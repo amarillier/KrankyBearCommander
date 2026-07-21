@@ -1,0 +1,176 @@
+// Package panelstate holds one pane-tab's navigation/view/selection state as
+// plain data + logic, with no Fyne dependency, so the locked-navigation rules
+// (the trickiest behavior in the file manager) can be unit-tested directly.
+package panelstate
+
+import (
+	"sort"
+	"strings"
+
+	"commander/internal/vfs"
+)
+
+// ViewMode selects how a tab's listing is rendered.
+type ViewMode int
+
+const (
+	ViewBrief ViewMode = iota
+	ViewExpanded
+)
+
+// SortField selects which column/attribute entries are ordered by. Within
+// any field, directories are always grouped before files (standard commander
+// convention), and ".." (parent) always sorts first of all.
+type SortField int
+
+const (
+	SortName SortField = iota
+	SortExt
+	SortSize
+	SortModified
+)
+
+// State is one tab's navigation/view/selection state.
+type State struct {
+	Path string // current directory, backend-native path
+
+	Locked          bool
+	LockedRoot      string
+	AllowNavigation bool // meaningful only when Locked
+
+	ViewMode      ViewMode
+	SortField     SortField
+	SortAscending bool
+
+	Selected map[string]bool // selected entry names within Path
+	Cursor   string          // name of the cursor row within Path
+}
+
+// New returns a fresh, unlocked tab state rooted at path.
+func New(path string) *State {
+	return &State{
+		Path:          path,
+		SortField:     SortName,
+		SortAscending: true,
+		Selected:      map[string]bool{},
+	}
+}
+
+// Lock pins the tab to its current directory. allowNavigation controls
+// whether the user may still cd into subdirectories (see package doc /
+// CLAUDE-adjacent plan notes): true permits free navigation below the lock
+// (with Home/"\"/"/" snapping back to it), false refuses all navigation.
+func (s *State) Lock(allowNavigation bool) {
+	s.Locked = true
+	s.LockedRoot = s.Path
+	s.AllowNavigation = allowNavigation
+}
+
+// Unlock releases the tab to navigate anywhere.
+func (s *State) Unlock() {
+	s.Locked = false
+	s.LockedRoot = ""
+}
+
+// CanNavigate reports whether the user is currently allowed to change
+// directory in this tab at all.
+func (s *State) CanNavigate() bool {
+	return !s.Locked || s.AllowNavigation
+}
+
+// Navigate changes the tab's current directory to target, clearing selection
+// and cursor. It refuses (returning false, leaving Path unchanged) when the
+// tab is locked with navigation denied.
+func (s *State) Navigate(target string) bool {
+	if !s.CanNavigate() {
+		return false
+	}
+	s.Path = target
+	s.Selected = map[string]bool{}
+	s.Cursor = ""
+	return true
+}
+
+// HomeTarget returns where Home / "\" / "/" should navigate to: the locked
+// root when locked-with-navigation-allowed, otherwise defaultHome (the
+// caller's resolved filesystem root or user home directory preference).
+// Locked-without-navigation has no Home target since navigation is refused
+// entirely; callers should not invoke Home in that state.
+func (s *State) HomeTarget(defaultHome string) string {
+	if s.Locked && s.AllowNavigation {
+		return s.LockedRoot
+	}
+	return defaultHome
+}
+
+// ToggleSelect flips whether name is selected.
+func (s *State) ToggleSelect(name string) {
+	if s.Selected[name] {
+		delete(s.Selected, name)
+	} else {
+		s.Selected[name] = true
+	}
+}
+
+// ClearSelection empties the selection set.
+func (s *State) ClearSelection() {
+	s.Selected = map[string]bool{}
+}
+
+// ToggleSort sets the sort field, flipping direction if it's already the
+// active field (click-same-header-again behavior), otherwise switching field
+// and defaulting to ascending.
+func (s *State) ToggleSort(field SortField) {
+	if s.SortField == field {
+		s.SortAscending = !s.SortAscending
+		return
+	}
+	s.SortField = field
+	s.SortAscending = true
+}
+
+// SortEntries orders entries per field/ascending, always grouping
+// directories before files, both alphabetically-tiebroken.
+func SortEntries(entries []vfs.Entry, field SortField, ascending bool) []vfs.Entry {
+	out := make([]vfs.Entry, len(entries))
+	copy(out, entries)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.IsDir != b.IsDir {
+			return a.IsDir // directories first regardless of sort direction
+		}
+		less := lessBy(a, b, field)
+		if !ascending {
+			return !less
+		}
+		return less
+	})
+	return out
+}
+
+func lessBy(a, b vfs.Entry, field SortField) bool {
+	switch field {
+	case SortSize:
+		if a.Size != b.Size {
+			return a.Size < b.Size
+		}
+	case SortModified:
+		if !a.ModTime.Equal(b.ModTime) {
+			return a.ModTime.Before(b.ModTime)
+		}
+	case SortExt:
+		ae, be := extOf(a.Name), extOf(b.Name)
+		if ae != be {
+			return ae < be
+		}
+	}
+	return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+}
+
+func extOf(name string) string {
+	i := strings.LastIndexByte(name, '.')
+	if i <= 0 { // no dot, or dotfile with no extension (".bashrc")
+		return ""
+	}
+	return strings.ToLower(name[i+1:])
+}
