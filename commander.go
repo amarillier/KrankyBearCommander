@@ -9,6 +9,8 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
+	"commander/internal/editors"
+	"commander/internal/favorites"
 	"commander/internal/layout"
 	"commander/internal/vfs"
 	"commander/internal/vfs/localfs"
@@ -28,7 +30,9 @@ type commander struct {
 	fs  vfs.FileSystem
 
 	colorScheme     ColorScheme
-	activePaneIndex int // 0 = left, 1 = right
+	activePaneIndex int            // 0 = left, 1 = right
+	favorites       favorites.List // shared across both panes — see favorites_ui.go
+	editorConfig    editors.Config // F4 preference — see editors_ui.go
 
 	left  *pane
 	right *pane
@@ -43,8 +47,11 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.colorScheme = loadColorScheme(a)
 	c.statusBar = widget.NewLabel("")
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey)
+	c.loadFavorites()
+	c.loadEditors()
+
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showAddFavoriteMenu)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showAddFavoriteMenu)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5
@@ -90,6 +97,37 @@ func (c *commander) setActivePane(idx int) {
 	if v := c.right.activeView(); v != nil {
 		v.Refresh()
 	}
+}
+
+// swapPanes exchanges the left and right panes' entire tab contents (paths,
+// locks, view modes, sort, selection) — which pane is "active" stays with
+// the visual slot (left/right), not the content, matching classic
+// dual-pane-commander "swap panels" behavior.
+func (c *commander) swapPanes() {
+	c.left.views, c.right.views = c.right.views, c.left.views
+	c.left.states, c.right.states = c.right.states, c.left.states
+
+	leftItems, rightItems := c.left.tabs.Items, c.right.tabs.Items
+	leftActive, rightActive := c.left.tabs.SelectedIndex(), c.right.tabs.SelectedIndex()
+
+	c.left.tabs.SetItems(rightItems)
+	c.right.tabs.SetItems(leftItems)
+
+	// Each view's callbacks (onNavigated/onStatus/onFocusGained/onOtherKey/
+	// onSelection) and isActive check were bound to whichever pane built it;
+	// after moving views across, those must point at their new owner.
+	c.left.rebindViews()
+	c.right.rebindViews()
+
+	if rightActive >= 0 {
+		c.left.tabs.SelectIndex(rightActive)
+	}
+	if leftActive >= 0 {
+		c.right.tabs.SelectIndex(leftActive)
+	}
+
+	c.left.refreshChrome()
+	c.right.refreshChrome()
 }
 
 func (c *commander) togglePane() {

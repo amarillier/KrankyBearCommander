@@ -51,6 +51,46 @@ func TestLockedDenyNavigation_RefusesDirectoryChange(t *testing.T) {
 	}
 }
 
+func TestJumpBypassesLockWithoutChangingIt(t *testing.T) {
+	s := New("/srv/data")
+	s.Lock(false) // fully pinned: Navigate would refuse any directory change
+
+	s.Jump("/home/user/Desktop")
+
+	if s.Path != "/home/user/Desktop" {
+		t.Fatalf("Jump should change Path even when locked, got %q", s.Path)
+	}
+	if !s.Locked || s.LockedRoot != "/srv/data" || s.AllowNavigation {
+		t.Fatalf("Jump must not alter the lock itself, got Locked=%v LockedRoot=%q AllowNavigation=%v",
+			s.Locked, s.LockedRoot, s.AllowNavigation)
+	}
+}
+
+func TestJumpClearsSelectionAndCursor(t *testing.T) {
+	s := New("/home/user")
+	s.ToggleSelect("a.txt")
+	s.Cursor = "a.txt"
+
+	s.Jump("/home/user/docs")
+
+	if len(s.Selected) != 0 || s.Cursor != "" {
+		t.Fatalf("Jump should clear selection/cursor like Navigate, got Selected=%v Cursor=%q", s.Selected, s.Cursor)
+	}
+}
+
+func TestHomeTargetReturnsLockedRootEvenWhenNavigationDenied(t *testing.T) {
+	s := New("/srv/data")
+	s.Lock(false) // fully pinned
+
+	// Home is implemented as a Jump (see fileListView.Home), so it must
+	// still resolve to the locked root even though Navigate itself would
+	// refuse to go anywhere — that's the whole point of a locked tab's Home:
+	// getting back after an explicit detour (e.g. a Favorites jump).
+	if got := s.HomeTarget("/home/user"); got != "/srv/data" {
+		t.Fatalf("HomeTarget = %q, want locked root /srv/data even when navigation is denied", got)
+	}
+}
+
 func TestUnlockRestoresFreeNavigation(t *testing.T) {
 	s := New("/srv/data")
 	s.Lock(false)

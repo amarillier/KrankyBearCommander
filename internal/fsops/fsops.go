@@ -148,6 +148,12 @@ func Mkdir(path string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
+// DirSize returns the total size of every file under path, walked
+// recursively (du -s-style) — used by the "Calculate Folder Sizes" command.
+func DirSize(path string) (int64, error) {
+	return totalSize([]string{path})
+}
+
 func totalSize(paths []string) (int64, error) {
 	var total int64
 	for _, p := range paths {

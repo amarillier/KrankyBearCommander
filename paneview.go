@@ -22,13 +22,15 @@ import (
 // pane owns one side's tabs; each tab pairs a panelstate.State with the
 // fileListView that renders it.
 type pane struct {
-	fs           vfs.FileSystem
-	win          fyne.Window
-	colors       func() ColorScheme
-	isActivePane func() bool
-	onActivated  func() // this pane was clicked into; tell commander to make it active
-	onStatus     func(msg string)
-	onOtherKey   func(*fyne.KeyEvent) // forwarded to each tab's fileListView — see keyTable
+	fs            vfs.FileSystem
+	win           fyne.Window
+	colors        func() ColorScheme
+	isActivePane  func() bool
+	onActivated   func() // this pane was clicked into; tell commander to make it active
+	onStatus      func(msg string)
+	onOtherKey    func(*fyne.KeyEvent)                        // forwarded to each tab's fileListView — see keyTable
+	onFavorites   func()                                      // Favorites button clicked; commander owns the shared list (favorites_ui.go)
+	onAddFavorite func(path, label string, pos fyne.Position) // right-click "add to favorites"; forwarded to each tab's fileListView
 
 	tabs   *container.DocTabs
 	views  []*fileListView
@@ -37,11 +39,15 @@ type pane struct {
 	statusLabel *widget.Label
 	lockBtn     *ttwidget.Button
 
+	lastCursorInfo string
+	lastSelCount   int
+	lastSelSize    int64
+
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent)) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onAddFavorite func(path, label string, pos fyne.Position)) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onAddFavorite: onAddFavorite}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -63,7 +69,10 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, isAc
 	fullBtn := ttwidget.NewButton("Full", func() { p.onActivated(); p.setViewMode(panelstate.ViewExpanded); unfocus() })
 	fullBtn.SetToolTip("Switch to the detailed view with sortable Name/Size/Modified columns")
 
-	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn)
+	favBtn := ttwidget.NewButton("★", func() { p.onActivated(); p.onFavorites(); unfocus() })
+	favBtn.SetToolTip("Favorites: jump to a volume or bookmarked directory, or add/manage bookmarks")
+
+	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn)
 
 	p.tabs = container.NewDocTabs()
 	p.tabs.CreateTab = func() *container.TabItem {
@@ -129,16 +138,34 @@ func (p *pane) defaultHome() string {
 // out-of-range slice index).
 func (p *pane) newTabItem(state *panelstate.State) *container.TabItem {
 	view := newFileListView(p.fs, state, p.colors, p.isActivePane)
-	view.onNavigated = func() { p.refreshChrome() }
-	view.onStatus = p.onStatus
-	view.onFocusGained = p.onActivated
-	view.onSelection = func(count int, size int64) { p.updateStatusLine(count, size) }
-	view.onOtherKey = p.onOtherKey
+	p.bindView(view)
 
 	item := container.NewTabItem(tabLabel(state), view.Build())
 	p.views = append(p.views, view)
 	p.states = append(p.states, state)
 	return item
+}
+
+// bindView (re)points a view's callbacks and active-pane check at p — used
+// both for freshly built views and, after swapPanes moves views to a new
+// owning pane, to rebind them there.
+func (p *pane) bindView(view *fileListView) {
+	view.isActive = p.isActivePane
+	view.onNavigated = func() { p.refreshChrome() }
+	view.onStatus = p.onStatus
+	view.onFocusGained = p.onActivated
+	view.onSelection = func(count int, size int64) { p.updateStatusLine(count, size) }
+	view.onCursorInfo = func(info string) { p.lastCursorInfo = info; p.renderStatusLine() }
+	view.onOtherKey = p.onOtherKey
+	view.onAddFavorite = p.onAddFavorite
+}
+
+// rebindViews re-binds every view p currently holds — called after
+// swapPanes moves views' ownership between panes.
+func (p *pane) rebindViews() {
+	for _, v := range p.views {
+		p.bindView(v)
+	}
 }
 
 // addTabFromState creates a tab and appends+selects it directly — for call
@@ -260,7 +287,12 @@ func (p *pane) refreshChrome() {
 	} else {
 		p.lockBtn.SetText("🔓")
 	}
-	p.statusLabel.SetText(state.Path)
+	// Switching tabs changes which cursor/selection applies; reset until the
+	// newly active view reports its own (Reload, called when a tab is built
+	// or re-selected, does so via onCursorInfo/onSelection).
+	p.lastCursorInfo = state.Path
+	p.lastSelCount, p.lastSelSize = 0, 0
+	p.renderStatusLine()
 }
 
 // snapshot captures this pane's tabs/active-tab for persistence.
@@ -291,15 +323,19 @@ func (p *pane) restoreFromLayout(pl layout.PaneLayout) {
 }
 
 func (p *pane) updateStatusLine(count int, size int64) {
-	state := p.activeState()
-	if state == nil {
-		return
+	p.lastSelCount, p.lastSelSize = count, size
+	p.renderStatusLine()
+}
+
+// renderStatusLine combines the cursor row's info (name + size/modified, or
+// item count for a directory — see fileListView.cursorInfo) with a
+// "[N selected, size]" suffix whenever there's an explicit multi-selection.
+func (p *pane) renderStatusLine() {
+	text := p.lastCursorInfo
+	if p.lastSelCount > 0 {
+		text = fmt.Sprintf("%s   [%d selected, %s]", text, p.lastSelCount, humanSize(p.lastSelSize))
 	}
-	if count > 0 {
-		p.statusLabel.SetText(fmt.Sprintf("%s   [%d selected, %s]", state.Path, count, humanSize(size)))
-	} else {
-		p.statusLabel.SetText(state.Path)
-	}
+	p.statusLabel.SetText(text)
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

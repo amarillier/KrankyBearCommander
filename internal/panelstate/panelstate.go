@@ -80,7 +80,9 @@ func (s *State) CanNavigate() bool {
 
 // Navigate changes the tab's current directory to target, clearing selection
 // and cursor. It refuses (returning false, leaving Path unchanged) when the
-// tab is locked with navigation denied.
+// tab is locked with navigation denied. This is "casual" in-pane browsing
+// (double-click/Enter into a subdirectory or ".."), which a full lock is
+// meant to prevent — see Jump for the explicit-destination exception.
 func (s *State) Navigate(target string) bool {
 	if !s.CanNavigate() {
 		return false
@@ -91,13 +93,26 @@ func (s *State) Navigate(target string) bool {
 	return true
 }
 
+// Jump changes the tab's current directory to target unconditionally,
+// ignoring any lock — for explicit "take me here" actions (Favorites,
+// Volumes, Home) rather than casual in-pane browsing. It never touches
+// Locked/LockedRoot/AllowNavigation, so a locked tab's Home target (and any
+// re-lock) is unaffected by wherever a jump lands; the lock only ever
+// changes via Lock/Unlock.
+func (s *State) Jump(target string) {
+	s.Path = target
+	s.Selected = map[string]bool{}
+	s.Cursor = ""
+}
+
 // HomeTarget returns where Home / "\" / "/" should navigate to: the locked
-// root when locked-with-navigation-allowed, otherwise defaultHome (the
-// caller's resolved filesystem root or user home directory preference).
-// Locked-without-navigation has no Home target since navigation is refused
-// entirely; callers should not invoke Home in that state.
+// root when locked, otherwise defaultHome (the caller's resolved filesystem
+// root or user home directory preference). Home is a Jump (see above), so it
+// works even when the tab denies casual navigation — that's the whole point
+// of a locked tab's Home button: getting back after an explicit detour
+// (e.g. a Favorites jump) that Navigate itself would have refused.
 func (s *State) HomeTarget(defaultHome string) string {
-	if s.Locked && s.AllowNavigation {
+	if s.Locked {
 		return s.LockedRoot
 	}
 	return defaultHome

@@ -60,3 +60,30 @@ func TestOpenSpawnsExecutableDetached(t *testing.T) {
 	}
 	t.Fatal("spawned script never ran (marker file was not created)")
 }
+
+func TestOpenWithRunsCommandWithPathArgument(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a Unix shebang script")
+	}
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	script := filepath.Join(dir, "editor.sh")
+	// Simulates an external editor invoked as `editor.sh <file>`.
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := OpenWith(script, marker); err != nil {
+		t.Fatalf("OpenWith failed: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("OpenWith's command never ran (marker file was not created)")
+}

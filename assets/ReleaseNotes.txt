@@ -1,8 +1,20 @@
+Version 0.2.0 - July 21, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Release notes
+KrankyBear Commander Application: - Windows, Linux and MacOS template application
 
-0.1.NEXT
+Future ideas:
 - nothing specific planned for now
+- swap left and right panes
+- user file edit choice - built in or external and allow multiple for swicthing
+- Favorites button like nimble commander and easy right click add directories and volumes to favorites
+- Status bar at the bototm showing file or directory name, size, info - e.g. number of files in dir
+- Options for columns for file extension, permissions and ability to sort extension, or first by extension then by file name - ascending and descending
 
-0.1.0 
+Version 0.1.0 - July 21, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Cross platform multi-tab, dual pane file manager application
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
 - initial checkin
-- Windows, Linux and MacOS notifications
+- Windows, Linux and MacOS template application

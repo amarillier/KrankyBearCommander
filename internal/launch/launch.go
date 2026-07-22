@@ -57,6 +57,16 @@ func spawnDetached(path string) error {
 	return cmd.Start()
 }
 
+// OpenWith runs `command path` detached the same way Open's direct-execute
+// path does — for external-editor / "open with a specific program"
+// integrations, as opposed to Open's own executable-vs-file-association
+// choice.
+func OpenWith(command, path string) error {
+	cmd := exec.Command(command, path)
+	cmd.SysProcAttr = detachAttr()
+	return cmd.Start()
+}
+
 func openWithDefaultApp(path string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

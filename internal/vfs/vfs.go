@@ -6,6 +6,7 @@ package vfs
 
 import (
 	"io"
+	"io/fs"
 	"time"
 )
 
@@ -16,6 +17,7 @@ type Entry struct {
 	ModTime  time.Time
 	IsDir    bool
 	ReadOnly bool
+	Mode     fs.FileMode // full permission bits, for the Permissions column
 }
 
 // FileSystem is the minimal set of operations a pane needs to browse and

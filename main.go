@@ -16,7 +16,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "0.1.0" // see FyneApp.toml
+	appVersion = "0.2.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -114,6 +114,8 @@ func quitApp(a fyne.App, win fyne.Window) {
 
 func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	fileMenu := fyne.NewMenu("File",
+		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
+		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", func() { fyne.Do(func() { quitApp(a, win) }) }),
 	)
 	viewMenu := fyne.NewMenu("View",

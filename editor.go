@@ -15,8 +15,15 @@ import (
 
 	fynetooltip "github.com/dweymouth/fyne-tooltip"
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
+
+	"commander/internal/editors"
+	"commander/internal/launch"
 )
 
+// doEdit opens the selected file in whichever editor is currently the
+// default (see editors_ui.go / the F9 popup's "Editors" submenu): the
+// built-in editor below, or one of the configured external editors, spawned
+// detached with the file path as its last argument.
 func (c *commander) doEdit() {
 	paths := c.activePane().activeView().SelectionOrCursor()
 	if len(paths) == 0 {
@@ -28,6 +35,18 @@ func (c *commander) doEdit() {
 		c.showStatus("F4: select a file, not a directory")
 		return
 	}
+
+	if c.editorConfig.Default != editors.BuiltinName {
+		if ed, ok := c.editorConfig.Find(c.editorConfig.Default); ok {
+			if err := launch.OpenWith(ed.Command, path); err != nil {
+				dialog.ShowError(err, c.win)
+			}
+			return
+		}
+		// Configured default no longer exists (removed since last set) —
+		// fall through to the built-in editor rather than silently failing.
+	}
+
 	pane := c.activePane()
 	showEditor(c.app, c.win, path, func() { pane.activeView().Reload() })
 }

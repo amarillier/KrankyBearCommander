@@ -50,6 +50,7 @@ func entryFromInfo(name string, info os.FileInfo) vfs.Entry {
 		Size:     info.Size(),
 		ModTime:  info.ModTime(),
 		IsDir:    info.IsDir(),
+		Mode:     info.Mode(),
 		ReadOnly: info.Mode().Perm()&0o200 == 0,
 	}
 }

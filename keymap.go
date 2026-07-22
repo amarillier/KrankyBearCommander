@@ -19,6 +19,7 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
@@ -67,6 +68,12 @@ func (c *commander) dispatchKey(ev *fyne.KeyEvent) {
 
 func (c *commander) registerShortcuts() {
 	c.win.Canvas().SetOnTypedKey(c.dispatchKey)
+
+	// Ctrl (a real, non-Shift modifier) doesn't hit the triggersShortcut bug
+	// described above, so Ctrl+U can safely use the normal AddShortcut path
+	// for "swap panes" (classic dual-pane-commander binding).
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyU, Modifier: desktop.ControlModifier},
+		func(fyne.Shortcut) { c.swapPanes() })
 }
 
 // keyBarButton builds one function-key bar button with a tooltip explaining
@@ -94,7 +101,7 @@ func (c *commander) buildFunctionKeyBar() fyne.CanvasObject {
 		keyBarButton(canvas, "F3 View", "View the selected file (read-only)", c.doView),
 		keyBarButton(canvas, "F4 Edit", "Edit the selected file in the built-in text editor", c.doEdit),
 		keyBarButton(canvas, "F5 Copy", "Copy the selection to the other pane's directory", c.doCopy),
-		keyBarButton(canvas, "F6 Move", "Move the selection to the other pane, or rename a single item", c.doMoveOrRename),
+		keyBarButton(canvas, "F6 Ren/Move", "Move the selection to the other pane, or rename a single item", c.doMoveOrRename),
 		keyBarButton(canvas, "F7 MkDir", "Create a new folder in the active pane", c.doMkdir),
 		keyBarButton(canvas, "F8 Delete", "Send the selection to the trash", c.doDeleteTrash),
 		keyBarButton(canvas, "⇧F8 Del!", "Permanently delete the selection — bypasses the trash, cannot be undone", c.doDeletePermanent),
@@ -117,6 +124,9 @@ func (c *commander) doActivateCursor() {
 // so this shows a small popup menu with the actions that don't already have
 // their own function key.
 func (c *commander) doOpenMenu() {
+	editorsItem := fyne.NewMenuItem("Editors", nil)
+	editorsItem.ChildMenu = c.buildEditorsSubmenu()
+
 	menu := fyne.NewMenu("",
 		fyne.NewMenuItem("New Tab (active pane)", func() {
 			p := c.activePane()
@@ -124,10 +134,13 @@ func (c *commander) doOpenMenu() {
 		}),
 		fyne.NewMenuItem("Brief View", func() { c.activePane().setViewMode(panelstate.ViewBrief) }),
 		fyne.NewMenuItem("Full View", func() { c.activePane().setViewMode(panelstate.ViewExpanded) }),
+		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { c.swapPanes() }),
+		fyne.NewMenuItem("Calculate Folder Sizes", func() { c.doCalculateFolderSizes() }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Panel Colors…", func() {
 			showColorSchemeSettings(c.app, c.win, c.applyColorScheme)
 		}),
+		editorsItem,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Help", func() { showHelp(c.app) }),
 		fyne.NewMenuItem("About", func() { showAbout(c.app) }),

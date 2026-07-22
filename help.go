@@ -33,36 +33,127 @@ func showHelp(a fyne.App) {
 	helpWindow = a.NewWindow(appName + " - Help")
 	helpWindow.SetIcon(resourceKrankyBearCommanderPng)
 
-	// PLACEHOLDER HELP TEXT — customize for your application.
-	// rename-app.sh rewrites names/URLs but NOT this prose, so edit the sections
-	// below (and the header label) when you start a new project.
 	helpText := `` + appName + ` - Help
 
 OVERVIEW:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-This is placeholder help text from the template. Replace it with help for your
-application by editing helpText in help.go.
+A free, cross-platform dual-pane file manager in the spirit of Norton
+Commander / Total Commander / Nimble Commander / Midnight Commander. Two
+panes, each with its own tabs, browse independently; the classic F-key row
+along the bottom drives every file operation.
 
-FEATURES:
+PANES & TABS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• TODO: describe your application's main features here, grouped into sections.
+• Click a pane (or a row inside it) to make it the active pane — the active
+  pane's cursor row is highlighted; F-key operations act on it, and Copy/Move
+  target the OTHER pane's current directory.
+• "+" on a tab strip opens a new tab; the × on a tab closes it (at least one
+  tab per pane always stays open).
+• 🔓/🔒 locks a tab to its current directory. Locking asks whether you can
+  still open subdirectories from there: if allowed, Home/\/ / always snap
+  back to the locked directory instead of going further; if not, the tab is
+  fully pinned and directory changes are refused.
+• ⌂ (Home) goes to the locked directory (if locked) or your home directory.
+• Swap Panes (Ctrl+U, or the popup menu) exchanges the left and right panes'
+  entire tab contents — paths, locks, view mode, sort, selection — at once.
+
+VIEW MODES & SORTING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Brief: a compact, name-only view wrapped into as many columns as fit.
+• Full: adds sortable Name / Ext / Size / Modified / Permissions columns —
+  click a header to sort by it, click again to reverse. Sorting by
+  Extension breaks ties by name, so files group by type and then
+  alphabetically within each type.
+• Directories always sort before files, and ".." (parent) always comes
+  first when the tab isn't already at its filesystem root.
+
+FUNCTION KEYS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+F1  Help                 This window.
+F3  View                 Read-only viewer — text, or a hex dump for
+                          anything that looks binary.
+F4  Edit                 Opens the built-in text editor, or your chosen
+                          default external editor (see EDITORS below).
+F5  Copy                 Copies the selection (or the cursor item, if
+                          nothing's explicitly selected) to the other pane's
+                          directory.
+F6  Move / Rename        Multiple items move to the other pane's directory;
+                          a single item shows an editable path — change the
+                          name for a rename, the directory for a move, or
+                          both at once.
+F7  MkDir                 Creates a new folder in the active pane.
+F8  Delete                Sends the selection to the trash.
+⇧F8 Delete Permanently    Bypasses the trash — cannot be undone. Mouse/menu
+                          only (see KNOWN LIMITATIONS).
+F9  Menu                  New tab, view mode, Swap Panes, Panel Colors,
+                          Editors, Help, About.
+F10 Quit                  Quits ` + appName + `.
+Enter                     Opens/navigates into the cursor row, same as a
+                          double-click.
+Double-click               A directory navigates into it; a file opens with
+                          your OS's default application — unless it's an
+                          executable, which launches directly and detached
+                          (it keeps running after you quit, and won't get
+                          wrapped in a Terminal window on macOS).
+
+SELECTING FILES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Click a row to move the cursor there; use the checkbox beside a Name to add
+it to the multi-selection used by Copy/Move/Delete. With nothing explicitly
+selected, F-key operations act on just the cursor row.
+
+FAVORITES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The ★ button (one shared list, available from either pane) lists your
+filesystem's volumes plus your bookmarked directories — pick one to jump the
+active tab there. Right-click any directory to bookmark it directly, or use
+"Add Current Directory…" / "Manage Favorites…" from the ★ menu. Seeded on
+first run with common folders for your OS (Desktop, Downloads, and
+Applications on macOS).
+
+EDITORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+F4 opens whichever editor is currently the default: the built-in editor, or
+one of any number of external editors you configure (a name plus the
+command to launch — the file path is appended as its last argument).
+Change the default, or add/remove external editors, from F9 → Editors.
+
+PANEL COLORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The pane colors (background, normal/selected/cursor-row text) default to a
+Norton-Commander-style scheme and are fully customizable — F9 → Panel
+Colors, or View → Panel Colors — independent of the Light/Dark/System app
+theme (View menu), which governs the rest of the app's chrome.
 
 SMART FEATURES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ Theme Support: Light, Dark, or System theme (View menu) - matches your preference.
-✨ TODO: list any other convenience features.
+✨ Tab/pane/window layout, panel colors, favorites, and editor choice all
+   persist across launches.
+✨ Copy/Move run in the background with a progress dialog and
+   Overwrite/Skip/Rename/Cancel conflict handling (with "apply to all").
+✨ Theme Support: Light, Dark, or System theme (View menu) - matches your
+   preference.
+✨ Tooltips on every button explain what it does.
 
 KEYBOARD SHORTCUTS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Standard system shortcuts apply:
+• F1, F3-F10 - see FUNCTION KEYS above.
+• Ctrl+U - Swap Panes.
+• Enter - Open/navigate into the cursor row.
 • Cmd/Ctrl+Q - Quit
 • Cmd/Ctrl+W - Close window
 • Cmd/Ctrl+M - Minimize
-• TODO: add your app-specific shortcuts.
 
 KNOWN LIMITATIONS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• TODO: note any current limitations.
+• Shift+F8 (permanently delete) is mouse/menu-only — a Fyne limitation means
+  key events don't carry modifier state, so it can't be told apart from
+  plain F8 via the keyboard. Fitting, really, for a "bypass the trash"
+  action.
+• Arrow-key row navigation and the right-click "Add to Favorites" menu are
+  most precise in Full view; Brief view's per-cell right-click is exact,
+  but the Full view's context menu acts on the current cursor row rather
+  than pixel-precise position.
 
 MORE INFORMATION:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

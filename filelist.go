@@ -8,11 +8,13 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"commander/internal/launch"
@@ -36,18 +38,30 @@ type fileListView struct {
 	colors   func() ColorScheme
 	isActive func() bool // whether this view's pane is the app's currently-active pane
 
-	onNavigated   func()                      // Path changed; let paneview refresh its tab title
-	onStatus      func(msg string)            // brief status-line message, e.g. "tab is locked"
-	onSelection   func(count int, size int64) // selection summary for the pane's status line
-	onFocusGained func()                      // a row in this view was clicked; tell paneview to activate this pane
-	onOtherKey    func(*fyne.KeyEvent)        // a key the table itself doesn't handle, while it has focus — see keyTable
+	onNavigated   func()                                      // Path changed; let paneview refresh its tab title
+	onStatus      func(msg string)                            // brief status-line message, e.g. "tab is locked"
+	onSelection   func(count int, size int64)                 // selection summary for the pane's status line
+	onCursorInfo  func(info string)                           // cursor row's name/size/modified (or item count for a dir)
+	onFocusGained func()                                      // a row in this view was clicked; tell paneview to activate this pane
+	onOtherKey    func(*fyne.KeyEvent)                        // a key the table itself doesn't handle, while it has focus — see keyTable
+	onAddFavorite func(path, label string, pos fyne.Position) // right-click on a directory row; commander owns the shared list
 
-	root   *fyne.Container // Build()'s return value; holds whichever view is active
-	table  *keyTable
-	header [3]*widget.Button // Name / Size / Modified sort buttons
+	root       *fyne.Container // Build()'s return value; holds whichever view is active
+	table      *keyTable
+	header     [4]*widget.Button // Name / Ext / Size / Modified sort buttons
+	permHeader *widget.Label     // Permissions column has no sort field, so it's a plain label
+	headerRow  fyne.CanvasObject // built once; also sizes Brief view's header-height spacer, so switching views doesn't shift the grid
 
 	entries   []vfs.Entry // current directory's entries, sorted, excluding ".."
 	hasParent bool
+
+	// computedSizes/computedParentSize hold "Calculate Folder Sizes" results
+	// (see foldersize_ui.go): recursive du -s-style totals for directories,
+	// which otherwise just show "<DIR>", and for the current directory
+	// itself (shown on the ".." row). Cleared on every Reload since they'd
+	// otherwise describe a listing that's no longer current.
+	computedSizes      map[string]int64
+	computedParentSize *int64
 
 	lastTapRow  int
 	lastTapTime time.Time
@@ -61,8 +75,11 @@ func newFileListView(fs vfs.FileSystem, state *panelstate.State, colors func() C
 func (v *fileListView) Build() fyne.CanvasObject {
 	v.table = v.buildTable()
 	v.header[0] = widget.NewButton("", func() { v.setSort(panelstate.SortName) })
-	v.header[1] = widget.NewButton("", func() { v.setSort(panelstate.SortSize) })
-	v.header[2] = widget.NewButton("", func() { v.setSort(panelstate.SortModified) })
+	v.header[1] = widget.NewButton("", func() { v.setSort(panelstate.SortExt) })
+	v.header[2] = widget.NewButton("", func() { v.setSort(panelstate.SortSize) })
+	v.header[3] = widget.NewButton("", func() { v.setSort(panelstate.SortModified) })
+	v.permHeader = widget.NewLabel("Perm")
+	v.headerRow = container.New(columnsLayout{}, v.header[0], v.header[1], v.header[2], v.header[3], v.permHeader)
 	v.root = container.NewStack()
 	v.Reload()
 	return v.root
@@ -71,6 +88,8 @@ func (v *fileListView) Build() fyne.CanvasObject {
 // Reload re-reads the directory from disk, re-sorts, and re-renders whichever
 // view mode is active.
 func (v *fileListView) Reload() {
+	v.computedSizes = nil
+	v.computedParentSize = nil
 	entries, err := v.fs.ReadDir(v.state.Path)
 	if err != nil {
 		if v.onStatus != nil {
@@ -93,11 +112,16 @@ func (v *fileListView) Refresh() {
 func (v *fileListView) renderActiveView() {
 	switch v.state.ViewMode {
 	case panelstate.ViewBrief:
-		v.root.Objects = []fyne.CanvasObject{v.buildBriefGrid()}
+		// An invisible spacer the same height as Full view's header row, so
+		// switching between Brief and Full doesn't shift the grid's top edge
+		// (and the two panes don't look lopsided when one's Brief and the
+		// other's Full).
+		spacer := canvas.NewRectangle(color.Transparent)
+		spacer.SetMinSize(fyne.NewSize(0, v.headerRow.MinSize().Height))
+		v.root.Objects = []fyne.CanvasObject{container.NewBorder(spacer, nil, nil, nil, v.buildBriefGrid())}
 	default:
 		v.table.Refresh()
-		headerRow := container.NewGridWithColumns(3, v.header[0], v.header[1], v.header[2])
-		v.root.Objects = []fyne.CanvasObject{container.NewBorder(headerRow, nil, nil, nil, v.table)}
+		v.root.Objects = []fyne.CanvasObject{container.NewBorder(v.headerRow, nil, nil, nil, v.table)}
 	}
 	v.root.Refresh()
 }
@@ -113,8 +137,9 @@ func (v *fileListView) refreshHeaderLabels() {
 		return " ▼"
 	}
 	v.header[0].SetText("Name" + arrow(panelstate.SortName))
-	v.header[1].SetText("Size" + arrow(panelstate.SortSize))
-	v.header[2].SetText("Modified" + arrow(panelstate.SortModified))
+	v.header[1].SetText("Ext" + arrow(panelstate.SortExt))
+	v.header[2].SetText("Size" + arrow(panelstate.SortSize))
+	v.header[3].SetText("Modified" + arrow(panelstate.SortModified))
 }
 
 func (v *fileListView) setSort(field panelstate.SortField) {
@@ -194,11 +219,12 @@ func (v *fileListView) rowColor(cs ColorScheme, name string) color.Color {
 // *keyTable and its TypedKey below gets first look at every keypress.
 type keyTable struct {
 	widget.Table
-	onOtherKey func(*fyne.KeyEvent)
+	onOtherKey     func(*fyne.KeyEvent)
+	onSecondaryTap func(*fyne.PointEvent)
 }
 
-func newKeyTable(length func() (int, int), create func() fyne.CanvasObject, update func(widget.TableCellID, fyne.CanvasObject), onOtherKey func(*fyne.KeyEvent)) *keyTable {
-	t := &keyTable{onOtherKey: onOtherKey}
+func newKeyTable(length func() (int, int), create func() fyne.CanvasObject, update func(widget.TableCellID, fyne.CanvasObject), onOtherKey func(*fyne.KeyEvent), onSecondaryTap func(*fyne.PointEvent)) *keyTable {
+	t := &keyTable{onOtherKey: onOtherKey, onSecondaryTap: onSecondaryTap}
 	t.Length = length
 	t.CreateCell = create
 	t.UpdateCell = update
@@ -217,9 +243,74 @@ func (t *keyTable) TypedKey(ev *fyne.KeyEvent) {
 	}
 }
 
+// TappedSecondary handles right-click. Table has no exported per-cell hit
+// test (columnAt/rowAt are private to package widget), so unlike the Brief
+// view's tappableCell — which right-clicks the exact cell under the
+// pointer — this acts on whatever the CURRENT cursor row is (i.e. left-click
+// a row first, then right-click anywhere on the table for its context menu).
+func (t *keyTable) TappedSecondary(e *fyne.PointEvent) {
+	if t.onSecondaryTap != nil {
+		t.onSecondaryTap(e)
+	}
+}
+
+// Table column indices (Expanded view): Name, Ext, Size, Modified, Perm.
+const (
+	colName = iota
+	colExt
+	colSize
+	colModified
+	colPerm
+	tableColumnCount
+)
+
+// columnWidths are shared between keyTable's SetColumnWidth calls and the
+// header row's columnsLayout below, so the header labels line up exactly
+// with the table's actual (unequal) column widths — a plain
+// container.NewGridWithColumns divides its row into equal fifths, which
+// didn't match.
+var columnWidths = [tableColumnCount]float32{
+	colName:     260,
+	colExt:      60,
+	colSize:     90,
+	colModified: 150,
+	colPerm:     100,
+}
+
+// columnsLayout lays out its children left-to-right at exactly columnWidths,
+// with theme.Padding() between them — matching how widget.Table spaces its
+// own columns (see Table's columnAt: `visibleColWidths[i-1] + padding`).
+type columnsLayout struct{}
+
+func (columnsLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	pad := theme.Padding()
+	var width, height float32
+	for i, o := range objects {
+		if i > 0 {
+			width += pad
+		}
+		width += columnWidths[i]
+		if h := o.MinSize().Height; h > height {
+			height = h
+		}
+	}
+	return fyne.NewSize(width, height)
+}
+
+func (columnsLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	pad := theme.Padding()
+	var x float32
+	for i, o := range objects {
+		w := columnWidths[i]
+		o.Move(fyne.NewPos(x, 0))
+		o.Resize(fyne.NewSize(w, size.Height))
+		x += w + pad
+	}
+}
+
 func (v *fileListView) buildTable() *keyTable {
 	t := newKeyTable(
-		func() (int, int) { return v.rowCount(), 3 },
+		func() (int, int) { return v.rowCount(), tableColumnCount },
 		func() fyne.CanvasObject {
 			return container.NewStack(
 				canvas.NewRectangle(color.Transparent),
@@ -232,10 +323,13 @@ func (v *fileListView) buildTable() *keyTable {
 				v.onOtherKey(ev)
 			}
 		},
+		func(e *fyne.PointEvent) { v.offerAddCursorToFavorites(e.AbsolutePosition) },
 	)
-	t.SetColumnWidth(0, 300)
-	t.SetColumnWidth(1, 90)
-	t.SetColumnWidth(2, 160)
+	t.SetColumnWidth(colName, columnWidths[colName])
+	t.SetColumnWidth(colExt, columnWidths[colExt])
+	t.SetColumnWidth(colSize, columnWidths[colSize])
+	t.SetColumnWidth(colModified, columnWidths[colModified])
+	t.SetColumnWidth(colPerm, columnWidths[colPerm])
 	t.OnSelected = v.handleTableTap
 	return t
 }
@@ -260,10 +354,10 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 	}
 
 	txt.Color = v.rowColor(cs, entry.Name)
-	check.Hidden = id.Col != 0 || entry.Name == parentEntryName
+	check.Hidden = id.Col != colName || entry.Name == parentEntryName
 
 	switch id.Col {
-	case 0:
+	case colName:
 		check.Checked = v.state.Selected[entry.Name]
 		name := entry.Name
 		check.OnChanged = func(bool) {
@@ -273,26 +367,66 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 			v.state.ToggleSelect(name)
 			v.reportSelection()
 			v.table.Refresh()
+			// widget.Check.Tapped grabs real keyboard focus for itself (its
+			// own TypedKey is a no-op), bypassing keyTable's focus
+			// interception entirely — left focused, it would silently eat
+			// the very next F-key press (e.g. F8 right after checking a
+			// box) exactly like the button/table-focus issue keymap.go's
+			// doc comment describes. Clearing focus here restores the
+			// canvas-level dispatch fallback for the next keypress.
+			if canvas := fyne.CurrentApp().Driver().CanvasForObject(v.table); canvas != nil {
+				canvas.Unfocus()
+			}
 		}
 		txt.Text = entry.Name
-	case 1:
+	case colExt:
+		if entry.Name == parentEntryName || entry.IsDir {
+			txt.Text = ""
+		} else {
+			txt.Text = fileExt(entry.Name)
+		}
+	case colSize:
 		switch {
 		case entry.Name == parentEntryName:
-			txt.Text = ""
+			if v.computedParentSize != nil {
+				txt.Text = humanSize(*v.computedParentSize)
+			} else {
+				txt.Text = ""
+			}
 		case entry.IsDir:
-			txt.Text = "<DIR>"
+			if sz, ok := v.computedSizes[entry.Name]; ok {
+				txt.Text = humanSize(sz)
+			} else {
+				txt.Text = "<DIR>"
+			}
 		default:
 			txt.Text = humanSize(entry.Size)
 		}
-	case 2:
+	case colModified:
 		if entry.Name == parentEntryName {
 			txt.Text = ""
 		} else {
 			txt.Text = entry.ModTime.Format("2006-01-02 15:04")
 		}
+	case colPerm:
+		if entry.Name == parentEntryName {
+			txt.Text = ""
+		} else {
+			txt.Text = entry.Mode.String()
+		}
 	}
 	check.Refresh()
 	txt.Refresh()
+}
+
+// fileExt returns name's extension without the leading dot, or "" for a
+// dotfile with no extension (".bashrc") or a name with none at all.
+func fileExt(name string) string {
+	i := strings.LastIndexByte(name, '.')
+	if i <= 0 {
+		return ""
+	}
+	return name[i+1:]
 }
 
 func (v *fileListView) handleTableTap(id widget.TableCellID) {
@@ -310,6 +444,7 @@ func (v *fileListView) handleTableTap(id widget.TableCellID) {
 
 	v.state.Cursor = entry.Name
 	v.table.Refresh()
+	v.reportSelection()
 
 	// widget.Table's own Select() silently no-ops (and skips firing
 	// OnSelected) when the same cell is tapped twice in a row — which would
@@ -356,13 +491,17 @@ func (v *fileListView) buildBriefCell(name string, cs ColorScheme) fyne.CanvasOb
 			v.onFocusGained()
 		}
 		v.state.Cursor = name
+		v.reportSelection()
 		v.renderActiveView()
 	}, func() {
 		if v.onFocusGained != nil {
 			v.onFocusGained()
 		}
 		v.state.Cursor = name
+		v.reportSelection()
 		v.activateByName(name)
+	}, func(e *fyne.PointEvent) {
+		v.offerAddNameToFavorites(name, e.AbsolutePosition)
 	})
 }
 
@@ -377,6 +516,27 @@ func (v *fileListView) activateByName(name string) {
 		return
 	}
 	v.activate(entry)
+}
+
+// offerAddCursorToFavorites is the Table view's right-click handler: offers
+// to bookmark the cursor row if (and only if) it's a directory. See
+// keyTable.TappedSecondary's doc comment for why this acts on the cursor row
+// rather than whatever's precisely under the pointer.
+func (v *fileListView) offerAddCursorToFavorites(pos fyne.Position) {
+	v.offerAddNameToFavorites(v.state.Cursor, pos)
+}
+
+// offerAddNameToFavorites is the Brief view's per-cell right-click handler
+// (see buildBriefCell) — name is exactly whatever's under the pointer there.
+func (v *fileListView) offerAddNameToFavorites(name string, pos fyne.Position) {
+	if v.onAddFavorite == nil || name == "" || name == parentEntryName {
+		return
+	}
+	entry, ok := entryByName(v.entries, name)
+	if !ok || !entry.IsDir {
+		return
+	}
+	v.onAddFavorite(v.fs.Join(v.state.Path, entry.Name), entry.Name, pos)
 }
 
 func entryByName(entries []vfs.Entry, name string) (vfs.Entry, bool) {
@@ -400,6 +560,9 @@ func (v *fileListView) activate(entry vfs.Entry) {
 	openWithOS(v.fs.Join(v.state.Path, entry.Name))
 }
 
+// navigateTo is casual in-pane browsing (double-click/Enter into a
+// subdirectory or ".."), which a locked tab may refuse — see JumpTo for
+// explicit-destination navigation that a lock never blocks.
 func (v *fileListView) navigateTo(target string) {
 	if !v.state.Navigate(target) {
 		if v.onStatus != nil {
@@ -407,21 +570,29 @@ func (v *fileListView) navigateTo(target string) {
 		}
 		return
 	}
+	v.reloadAfterNavigate()
+}
+
+// JumpTo is an explicit "take me here" navigation (Favorites, Volumes, Home)
+// that always works, even on a fully locked tab, and never touches the
+// tab's lock — Home afterward still returns to the same locked root as
+// before the jump. See panelstate.State.Jump.
+func (v *fileListView) JumpTo(target string) {
+	v.state.Jump(target)
+	v.reloadAfterNavigate()
+}
+
+func (v *fileListView) reloadAfterNavigate() {
 	v.Reload()
 	if v.onNavigated != nil {
 		v.onNavigated()
 	}
 }
 
-// Home navigates per the locked-tab rules in panelstate.State.HomeTarget.
+// Home always jumps to the locked root (if locked) or defaultHome — see
+// panelstate.State.HomeTarget and JumpTo.
 func (v *fileListView) Home(defaultHome string) {
-	if v.state.Locked && !v.state.AllowNavigation {
-		if v.onStatus != nil {
-			v.onStatus("tab is locked")
-		}
-		return
-	}
-	v.navigateTo(v.state.HomeTarget(defaultHome))
+	v.JumpTo(v.state.HomeTarget(defaultHome))
 }
 
 // ── selection ────────────────────────────────────────────────────────────────
@@ -445,19 +616,50 @@ func (v *fileListView) ToggleSelectCursor() {
 	v.Refresh()
 }
 
+// reportSelection tells the pane's status line about both the explicit
+// multi-selection (count/size) and the cursor row's own info — called
+// whenever either changes.
 func (v *fileListView) reportSelection() {
-	if v.onSelection == nil {
-		return
-	}
-	var count int
-	var total int64
-	for _, e := range v.entries {
-		if v.state.Selected[e.Name] {
-			count++
-			total += e.Size
+	if v.onSelection != nil {
+		var count int
+		var total int64
+		for _, e := range v.entries {
+			if v.state.Selected[e.Name] {
+				count++
+				total += e.Size
+			}
 		}
+		v.onSelection(count, total)
 	}
-	v.onSelection(count, total)
+	if v.onCursorInfo != nil {
+		v.onCursorInfo(v.cursorInfo())
+	}
+}
+
+// cursorInfo describes the cursor row for the status line: name + size +
+// modified time for a file, name + immediate item count for a directory
+// (not recursive — cheap even for huge trees). Falls back to the current
+// path when there's no cursor (fresh tab, or after a Reload with an
+// empty directory).
+func (v *fileListView) cursorInfo() string {
+	switch v.state.Cursor {
+	case "":
+		return v.state.Path
+	case parentEntryName:
+		return ".. (parent directory)"
+	}
+	entry, ok := entryByName(v.entries, v.state.Cursor)
+	if !ok {
+		return v.state.Path
+	}
+	if entry.IsDir {
+		children, err := v.fs.ReadDir(v.fs.Join(v.state.Path, entry.Name))
+		if err != nil {
+			return entry.Name + "  <DIR>"
+		}
+		return fmt.Sprintf("%s  <DIR>  %d item(s)", entry.Name, len(children))
+	}
+	return fmt.Sprintf("%s  %s  %s", entry.Name, humanSize(entry.Size), entry.ModTime.Format("2006-01-02 15:04"))
 }
 
 // SelectionOrCursor returns full paths for the explicit multi-selection, or
@@ -478,6 +680,47 @@ func (v *fileListView) SelectionOrCursor() []string {
 		paths[i] = v.fs.Join(v.state.Path, n)
 	}
 	return paths
+}
+
+// ── Calculate Folder Sizes (see foldersize_ui.go) ───────────────────────────
+
+// DirEntryNames returns the names of directory entries in the current
+// listing, excluding "..".
+func (v *fileListView) DirEntryNames() []string {
+	var names []string
+	for _, e := range v.entries {
+		if e.IsDir {
+			names = append(names, e.Name)
+		}
+	}
+	return names
+}
+
+// FullPath returns name's full path within this tab's current directory.
+func (v *fileListView) FullPath(name string) string {
+	return v.fs.Join(v.state.Path, name)
+}
+
+// CurrentPath is this tab's current directory (the ".." row's own size, once
+// computed, describes this directory's total).
+func (v *fileListView) CurrentPath() string {
+	return v.state.Path
+}
+
+// SetComputedSize records name's calculated recursive size and repaints.
+func (v *fileListView) SetComputedSize(name string, size int64) {
+	if v.computedSizes == nil {
+		v.computedSizes = map[string]int64{}
+	}
+	v.computedSizes[name] = size
+	v.Refresh()
+}
+
+// SetComputedParentSize records the current directory's own calculated
+// recursive size (shown on the ".." row) and repaints.
+func (v *fileListView) SetComputedParentSize(size int64) {
+	v.computedParentSize = &size
+	v.Refresh()
 }
 
 // ── small helpers ────────────────────────────────────────────────────────────
@@ -514,13 +757,14 @@ func humanSize(n int64) string {
 // distinction).
 type tappableCell struct {
 	widget.BaseWidget
-	content     fyne.CanvasObject
-	onTap       func()
-	onDoubleTap func()
+	content        fyne.CanvasObject
+	onTap          func()
+	onDoubleTap    func()
+	onSecondaryTap func(*fyne.PointEvent)
 }
 
-func newTappableCell(content fyne.CanvasObject, onTap, onDoubleTap func()) *tappableCell {
-	c := &tappableCell{content: content, onTap: onTap, onDoubleTap: onDoubleTap}
+func newTappableCell(content fyne.CanvasObject, onTap, onDoubleTap func(), onSecondaryTap func(*fyne.PointEvent)) *tappableCell {
+	c := &tappableCell{content: content, onTap: onTap, onDoubleTap: onDoubleTap, onSecondaryTap: onSecondaryTap}
 	c.ExtendBaseWidget(c)
 	return c
 }
@@ -538,5 +782,11 @@ func (c *tappableCell) Tapped(*fyne.PointEvent) {
 func (c *tappableCell) DoubleTapped(*fyne.PointEvent) {
 	if c.onDoubleTap != nil {
 		c.onDoubleTap()
+	}
+}
+
+func (c *tappableCell) TappedSecondary(e *fyne.PointEvent) {
+	if c.onSecondaryTap != nil {
+		c.onSecondaryTap(e)
 	}
 }

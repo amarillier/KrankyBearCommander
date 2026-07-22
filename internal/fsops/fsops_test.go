@@ -257,3 +257,20 @@ func TestProgressReportsCumulativeBytes(t *testing.T) {
 		t.Fatalf("final progress = %d/%d, want 5/5", lastDone, lastTotal)
 	}
 }
+
+func TestDirSize(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "top.txt"), "12345") // 5 bytes
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(dir, "sub", "nested.txt"), "1234567") // 7 bytes
+
+	got, err := DirSize(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 12 {
+		t.Fatalf("DirSize = %d, want 12 (5 + 7 bytes, recursive)", got)
+	}
+}
