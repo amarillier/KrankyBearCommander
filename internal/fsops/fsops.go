@@ -7,10 +7,12 @@ package fsops
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ConflictAction is the caller's decision when a destination path already
@@ -135,6 +137,38 @@ func Delete(paths []string, permanent bool) error {
 		}
 	}
 	return nil
+}
+
+// Duplicate copies path to a sibling in the same directory named "<name>
+// copy", "<name> copy 2", etc. (right-click "Duplicate") — unlike Copy, which
+// always targets the *other* pane, this clones an item in place, so it picks
+// its own non-colliding destination name rather than going through the
+// conflict-resolution dialog.
+func Duplicate(path string) (string, error) {
+	dest := duplicateName(filepath.Dir(path), filepath.Base(path))
+	total, err := totalSize([]string{path})
+	if err != nil {
+		return "", err
+	}
+	var done int64
+	if err := copyPath(path, dest, &done, total, noProgress, noConflict); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+// duplicateName returns "<dir>/<stem> copy<ext>", or "<dir>/<stem> copy
+// N<ext>" for the first N>=2 that doesn't already exist in dir.
+func duplicateName(dir, base string) string {
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	candidate := filepath.Join(dir, stem+" copy"+ext)
+	for n := 2; ; n++ {
+		if _, err := os.Lstat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+		candidate = filepath.Join(dir, fmt.Sprintf("%s copy %d%s", stem, n, ext))
+	}
 }
 
 // Rename renames oldPath to newPath (F6 rename-in-place).

@@ -16,7 +16,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "0.2.0" // see FyneApp.toml
+	appVersion = "0.3.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -113,14 +113,24 @@ func quitApp(a fyne.App, win fyne.Window) {
 // ── Menu + tray (mirror each other; see CLAUDE.md "System tray + main menu") ──
 
 func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
+	editorsItem := fyne.NewMenuItem("Manage Editors…", func() { cmdr.showManageEditors() })
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
 		fyne.NewMenuItemSeparator(),
+		editorsItem,
+		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", func() { fyne.Do(func() { quitApp(a, win) }) }),
 	)
+	hiddenFilesItem := fyne.NewMenuItem("Show Hidden Files", func() {
+		cmdr.toggleHiddenFiles()
+		fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) })
+	})
+	hiddenFilesItem.Checked = cmdr.showHiddenFiles
 	viewMenu := fyne.NewMenu("View",
 		fyne.NewMenuItem("Brief View (active pane)", func() { cmdr.activePane().setViewMode(panelstate.ViewBrief) }),
 		fyne.NewMenuItem("Full View (active pane)", func() { cmdr.activePane().setViewMode(panelstate.ViewExpanded) }),
+		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { cmdr.swapPanes() }),
+		hiddenFilesItem,
 		fyne.NewMenuItem("Panel Colors…", func() { showColorSchemeSettings(a, win, cmdr.applyColorScheme) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Light Theme", func() { setLightTheme(a) }),

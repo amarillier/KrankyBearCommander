@@ -111,7 +111,14 @@ func (c *commander) doMkdir() {
 	}
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder("New folder name")
-	dialog.NewCustomConfirm("New Folder", "Create", "Cancel", nameEntry, func(ok bool) {
+	// Prefill with the cursor row's name (classic commander muscle memory:
+	// F7 right after landing on/near a similarly-named item) so the user can
+	// either type straight over it or just tweak part of it.
+	if def := state.Cursor; def != "" && def != parentEntryName {
+		nameEntry.SetText(def)
+		nameEntry.CursorColumn = len([]rune(def))
+	}
+	d := dialog.NewCustomConfirm("New Folder", "Create", "Cancel", nameEntry, func(ok bool) {
 		if !ok || strings.TrimSpace(nameEntry.Text) == "" {
 			return
 		}
@@ -121,7 +128,12 @@ func (c *commander) doMkdir() {
 			return
 		}
 		p.activeView().Reload()
-	}, c.win).Show()
+	}, c.win)
+	d.Show()
+	// Select the prefilled name so typing immediately replaces it — Entry's
+	// select-all shortcut only takes effect once the widget is actually
+	// rendered, which Show() just triggered.
+	nameEntry.TypedShortcut(&fyne.ShortcutSelectAll{})
 }
 
 // ── F8 / Shift+F8 Delete ─────────────────────────────────────────────────────

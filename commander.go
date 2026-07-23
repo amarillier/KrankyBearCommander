@@ -33,6 +33,7 @@ type commander struct {
 	activePaneIndex int            // 0 = left, 1 = right
 	favorites       favorites.List // shared across both panes — see favorites_ui.go
 	editorConfig    editors.Config // F4 preference — see editors_ui.go
+	showHiddenFiles bool           // dotfile visibility, shared across both panes — see toggleHiddenFiles
 
 	left  *pane
 	right *pane
@@ -45,13 +46,14 @@ type commander struct {
 func newCommander(a fyne.App, win fyne.Window) *commander {
 	c := &commander{app: a, win: win, fs: localfs.New()}
 	c.colorScheme = loadColorScheme(a)
+	c.showHiddenFiles = a.Preferences().Bool(prefShowHiddenFiles)
 	c.statusBar = widget.NewLabel("")
 
 	c.loadFavorites()
 	c.loadEditors()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showAddFavoriteMenu)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showAddFavoriteMenu)
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5
@@ -128,6 +130,37 @@ func (c *commander) swapPanes() {
 
 	c.left.refreshChrome()
 	c.right.refreshChrome()
+}
+
+// prefShowHiddenFiles persists the dotfile-visibility toggle the same way
+// colors.go persists the color scheme — a single app-wide setting shared by
+// both panes (View menu / F9 popup), not a per-tab one.
+const prefShowHiddenFiles = "showHiddenFiles"
+
+// toggleHiddenFiles flips dotfile visibility, persists it, and reloads every
+// open tab in both panes so the change is visible immediately, not just in
+// whichever tab happens to be active.
+func (c *commander) toggleHiddenFiles() {
+	c.showHiddenFiles = !c.showHiddenFiles
+	c.app.Preferences().SetBool(prefShowHiddenFiles, c.showHiddenFiles)
+	for _, v := range c.left.views {
+		v.Reload()
+	}
+	for _, v := range c.right.views {
+		v.Reload()
+	}
+}
+
+func (c *commander) selectAllActive() {
+	if v := c.activePane().activeView(); v != nil {
+		v.SelectAll()
+	}
+}
+
+func (c *commander) deselectAllActive() {
+	if v := c.activePane().activeView(); v != nil {
+		v.DeselectAll()
+	}
 }
 
 func (c *commander) togglePane() {

@@ -258,6 +258,58 @@ func TestProgressReportsCumulativeBytes(t *testing.T) {
 	}
 }
 
+func TestDuplicateFile(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "a.txt"), "hello")
+
+	dest, err := Duplicate(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "a copy.txt"); dest != want {
+		t.Fatalf("dest = %q, want %q", dest, want)
+	}
+	if got := mustReadFile(t, dest); got != "hello" {
+		t.Fatalf("duplicated content = %q, want hello", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatalf("source should still exist after Duplicate: %v", err)
+	}
+}
+
+func TestDuplicateNameCollisionIncrements(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "a.txt"), "first")
+	mustWriteFile(t, filepath.Join(dir, "a copy.txt"), "already here")
+
+	dest, err := Duplicate(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "a copy 2.txt"); dest != want {
+		t.Fatalf("dest = %q, want %q", dest, want)
+	}
+}
+
+func TestDuplicateDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "proj", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(dir, "proj", "sub", "nested.txt"), "nested")
+
+	dest, err := Duplicate(filepath.Join(dir, "proj"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "proj copy"); dest != want {
+		t.Fatalf("dest = %q, want %q", dest, want)
+	}
+	if got := mustReadFile(t, filepath.Join(dest, "sub", "nested.txt")); got != "nested" {
+		t.Fatalf("duplicated nested content = %q, want nested", got)
+	}
+}
+
 func TestDirSize(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "top.txt"), "12345") // 5 bytes

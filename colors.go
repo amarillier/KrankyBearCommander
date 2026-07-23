@@ -16,22 +16,25 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// ColorScheme is the pane listing's 4 user-configurable colors.
+// ColorScheme is the pane listing's 5 user-configurable colors.
 type ColorScheme struct {
 	PanelBG      color.Color
 	TextNormal   color.Color
 	TextSelected color.Color
 	TextCursor   color.Color
+	TextDir      color.Color // directories and ".." — normal-priority, below selected/cursor
 }
 
 // classicBlueScheme returns the Norton-Commander-style defaults: dark navy
-// panel background, cyan normal text, yellow selected text, red cursor text.
+// panel background, cyan normal text, yellow selected text, red cursor text,
+// white directory text.
 func classicBlueScheme() ColorScheme {
 	return ColorScheme{
 		PanelBG:      color.NRGBA{R: 0x00, G: 0x00, B: 0x80, A: 0xff},
 		TextNormal:   color.NRGBA{R: 0x00, G: 0xff, B: 0xff, A: 0xff},
 		TextSelected: color.NRGBA{R: 0xff, G: 0xff, B: 0x00, A: 0xff},
 		TextCursor:   color.NRGBA{R: 0xff, G: 0x00, B: 0x00, A: 0xff},
+		TextDir:      color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff},
 	}
 }
 
@@ -40,6 +43,7 @@ const (
 	prefColorTextNormal   = "colorTextNormal"
 	prefColorTextSelected = "colorTextSelected"
 	prefColorTextCursor   = "colorTextCursor"
+	prefColorTextDir      = "colorTextDir"
 )
 
 // loadColorScheme reads the persisted scheme, falling back to classicBlueScheme
@@ -52,6 +56,7 @@ func loadColorScheme(a fyne.App) ColorScheme {
 		TextNormal:   hexOrDefault(prefs.String(prefColorTextNormal), def.TextNormal),
 		TextSelected: hexOrDefault(prefs.String(prefColorTextSelected), def.TextSelected),
 		TextCursor:   hexOrDefault(prefs.String(prefColorTextCursor), def.TextCursor),
+		TextDir:      hexOrDefault(prefs.String(prefColorTextDir), def.TextDir),
 	}
 }
 
@@ -63,6 +68,7 @@ func saveColorScheme(a fyne.App, cs ColorScheme) {
 	prefs.SetString(prefColorTextNormal, colorToHex(cs.TextNormal))
 	prefs.SetString(prefColorTextSelected, colorToHex(cs.TextSelected))
 	prefs.SetString(prefColorTextCursor, colorToHex(cs.TextCursor))
+	prefs.SetString(prefColorTextDir, colorToHex(cs.TextDir))
 }
 
 func colorToHex(c color.Color) string {
@@ -112,6 +118,7 @@ func showColorSchemeSettings(a fyne.App, win fyne.Window, onChange func(ColorSch
 		swatch("Normal Text…", func(c ColorScheme) color.Color { return c.TextNormal }, func(c *ColorScheme, v color.Color) { c.TextNormal = v }),
 		swatch("Selected Text…", func(c ColorScheme) color.Color { return c.TextSelected }, func(c *ColorScheme, v color.Color) { c.TextSelected = v }),
 		swatch("Active Cursor Text…", func(c ColorScheme) color.Color { return c.TextCursor }, func(c *ColorScheme, v color.Color) { c.TextCursor = v }),
+		swatch("Directory Text…", func(c ColorScheme) color.Color { return c.TextDir }, func(c *ColorScheme, v color.Color) { c.TextDir = v }),
 	)
 
 	resetBtn := widget.NewButton("Reset to Classic Blue", func() {

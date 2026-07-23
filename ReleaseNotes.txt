@@ -2,21 +2,34 @@ Release notes
 KrankyBear Commander: a free, cross-platform dual-pane file manager for Windows, Linux and macOS.
 
 Future ideas:
-- add manage editors under menus somewhere - ideal - maybe File / Preferences which might in future expose other system wide settings - F9 menus should mirror all features in main app and tray menus so users don't have to search 2 or 3 places
-- add switch panes (Ctrl U) to view menu so it is more discoverable. Even an icon next to favorites to quickly swap panes in app would be really nice
 - very useful feature - click file/directory name, second click to select name for easy inline rename capability - second click soon after selects name, not full name including extension to allow easy name renaming - only name selected
-- allow shift click to select multiple items as optional alternate to selecting checkboxes
-- right click menu options: open, open with, move to trash, compress, duplicate (means copy selected file(s)to <file-copy>, copy to clipboard
+- right click menu: compress selected file(s)/folder(s) into an archive, and copy to clipboard (open / open with / move to trash / duplicate shipped in 0.3.0). While true other OS components provide zip capability, this means I have to use Finder or Explorer to do that. Compress directly in commander for selected items, file(s) and directories is really useful - and I'd like to also provide options for both .zip and .7z, .tgz less valuable but would not be a bad third option. Anyway almost all Linux / Mac have easy zip and 7zip capabilities so tgz really adds nothing
 - drag from commander to other apps, drag from other and drop into commander to copy - maybe other keys e.g. shift drag / drop to move
-- F7 to create new directory when a file or directory is selected, use the name of the selected item (file or directory) as a start / default new directory name - with name selected so user can type and it wipes/overwrites, or move the cursor to use part of the name as a base
-- open same file/folder in opposite pane - "Reveal in opposite panel" - open in opposite current open pane/tab or "Reveal in opposite panel tab" - open a new tab in the opposite pane - to the current pane
 
-- user ability to resize columns
+Later phase:
+- user ability to resize columns from fixed sizes, then also to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names
 - tags ability - colors - select one or more files, add colored icon. Debatable usefulness - nice quick visual maybe - or add icon capabilities instead for user manual / visual grouping
 - TotalCmd has a really nice file rename option for renaming with patterns, any case to title case, proper case etc. and regex replace patterns - activated by selecting file(s) and Ctrl M. This is really powerful and could use some images from Total Cmd running on a Win system to replicate
 
-- Nimble has a 'New window' capability - maybe not really useful - user can launch a second commander easily
-
+Version 0.3.0 - July 23, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Right-click context menu on any file/directory row: Open, Open With
+   (your configured F4 external editors), Duplicate, Move to Trash, and
+   Reveal in Opposite Pane (same tab or a new one) — plus Add to Favorites
+   for directories.
+✨ NEW Show Hidden Files toggle (View menu / F9 popup) — dotfiles are
+   hidden by default; the choice persists across launches.
+✨ NEW Directories (and "..") get their own configurable text color in
+   Panel Colors, distinct from ordinary files.
+✨ NEW F7 New Folder prefills the cursor row's name so retyping part of it
+   is quick instead of typing a name from scratch.
+✨ NEW Swap Panes and Manage Editors… are now on the View/File menus, not
+   just the F9 popup.
+✨ NEW Shift-click range-selects between the anchor and clicked row; Ctrl
+   (⌘ on macOS)-click toggles just that row — an alternative to the
+   selection checkboxes for selecting many items at once.
+✨ NEW Select All (Ctrl+A / ⌘A) and Deselect All (Ctrl+Shift+A / ⌘⇧A),
+   plus a Select All/Deselect All toolbar button next to Favorites.
 
 Version 0.2.0 - July 21, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

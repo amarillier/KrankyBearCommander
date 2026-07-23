@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -33,18 +34,19 @@ const doubleTapWindow = 450 * time.Millisecond
 
 // fileListView renders and drives one tab's directory listing.
 type fileListView struct {
-	fs       vfs.FileSystem
-	state    *panelstate.State
-	colors   func() ColorScheme
-	isActive func() bool // whether this view's pane is the app's currently-active pane
+	fs         vfs.FileSystem
+	state      *panelstate.State
+	colors     func() ColorScheme
+	showHidden func() bool // dotfile visibility — shared app-wide setting, see commander.toggleHiddenFiles
+	isActive   func() bool // whether this view's pane is the app's currently-active pane
 
-	onNavigated   func()                                      // Path changed; let paneview refresh its tab title
-	onStatus      func(msg string)                            // brief status-line message, e.g. "tab is locked"
-	onSelection   func(count int, size int64)                 // selection summary for the pane's status line
-	onCursorInfo  func(info string)                           // cursor row's name/size/modified (or item count for a dir)
-	onFocusGained func()                                      // a row in this view was clicked; tell paneview to activate this pane
-	onOtherKey    func(*fyne.KeyEvent)                        // a key the table itself doesn't handle, while it has focus — see keyTable
-	onAddFavorite func(path, label string, pos fyne.Position) // right-click on a directory row; commander owns the shared list
+	onNavigated   func()                               // Path changed; let paneview refresh its tab title
+	onStatus      func(msg string)                     // brief status-line message, e.g. "tab is locked"
+	onSelection   func(count int, size int64)          // selection summary for the pane's status line
+	onCursorInfo  func(info string)                    // cursor row's name/size/modified (or item count for a dir)
+	onFocusGained func()                               // a row in this view was clicked; tell paneview to activate this pane
+	onOtherKey    func(*fyne.KeyEvent)                 // a key the table itself doesn't handle, while it has focus — see keyTable
+	onContextMenu func(name string, pos fyne.Position) // right-click on a row; commander owns the popup (contextmenu_ui.go)
 
 	root       *fyne.Container // Build()'s return value; holds whichever view is active
 	table      *keyTable
@@ -65,10 +67,16 @@ type fileListView struct {
 
 	lastTapRow  int
 	lastTapTime time.Time
+
+	// selectAnchor is the row name a Shift-click range extends from — it only
+	// moves on a plain or Ctrl click, so repeated Shift-clicks keep
+	// extending/shrinking the same range instead of re-basing from wherever
+	// the previous Shift-click landed (classic Explorer/Finder behavior).
+	selectAnchor string
 }
 
-func newFileListView(fs vfs.FileSystem, state *panelstate.State, colors func() ColorScheme, isActive func() bool) *fileListView {
-	return &fileListView{fs: fs, state: state, colors: colors, isActive: isActive, lastTapRow: -1}
+func newFileListView(fs vfs.FileSystem, state *panelstate.State, colors func() ColorScheme, showHidden func() bool, isActive func() bool) *fileListView {
+	return &fileListView{fs: fs, state: state, colors: colors, showHidden: showHidden, isActive: isActive, lastTapRow: -1}
 }
 
 // Build constructs the view's canvas objects and loads the initial listing.
@@ -97,6 +105,9 @@ func (v *fileListView) Reload() {
 		}
 		entries = nil
 	}
+	if v.showHidden != nil && !v.showHidden() {
+		entries = visibleEntries(entries)
+	}
 	v.entries = panelstate.SortEntries(entries, v.state.SortField, v.state.SortAscending)
 	v.hasParent = v.fs.Dir(v.state.Path) != v.state.Path
 	v.refreshHeaderLabels()
@@ -124,6 +135,20 @@ func (v *fileListView) renderActiveView() {
 		v.root.Objects = []fyne.CanvasObject{container.NewBorder(v.headerRow, nil, nil, nil, v.table)}
 	}
 	v.root.Refresh()
+}
+
+// visibleEntries drops dotfiles/dot-directories (the cross-platform "hidden
+// file" convention) when the user hasn't opted into showing them — see
+// commander.toggleHiddenFiles.
+func visibleEntries(entries []vfs.Entry) []vfs.Entry {
+	visible := entries[:0]
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name, ".") {
+			continue
+		}
+		visible = append(visible, e)
+	}
+	return visible
 }
 
 func (v *fileListView) refreshHeaderLabels() {
@@ -181,17 +206,21 @@ func (v *fileListView) orderedNames() []string {
 	return names
 }
 
-// rowColor returns the text color a row/cell should use given cursor/selection
-// state. Only the active pane shows its cursor row in TextCursor — the
-// inactive pane's cursor is drawn as normal text, so exactly one pane's
-// cursor stands out at a time (classic dual-pane behavior) without needing a
-// 5th "dimmed cursor" color.
-func (v *fileListView) rowColor(cs ColorScheme, name string) color.Color {
-	if v.isActive() && v.state.Cursor == name {
+// rowColor returns the text color a row/cell should use given cursor/
+// selection/type state. Only the active pane shows its cursor row in
+// TextCursor — the inactive pane's cursor is drawn as normal text, so
+// exactly one pane's cursor stands out at a time (classic dual-pane
+// behavior) without needing a 5th "dimmed cursor" color. Cursor/selection
+// take priority over the directory color, same as classic commanders.
+func (v *fileListView) rowColor(cs ColorScheme, entry vfs.Entry) color.Color {
+	if v.isActive() && v.state.Cursor == entry.Name {
 		return cs.TextCursor
 	}
-	if v.state.Selected[name] {
+	if v.state.Selected[entry.Name] {
 		return cs.TextSelected
+	}
+	if entry.IsDir {
+		return cs.TextDir
 	}
 	return cs.TextNormal
 }
@@ -219,8 +248,9 @@ func (v *fileListView) rowColor(cs ColorScheme, name string) color.Color {
 // *keyTable and its TypedKey below gets first look at every keypress.
 type keyTable struct {
 	widget.Table
-	onOtherKey     func(*fyne.KeyEvent)
-	onSecondaryTap func(*fyne.PointEvent)
+	onOtherKey      func(*fyne.KeyEvent)
+	onSecondaryTap  func(*fyne.PointEvent)
+	pendingModifier fyne.KeyModifier // Shift/Ctrl held on the click currently in flight — see MouseDown
 }
 
 func newKeyTable(length func() (int, int), create func() fyne.CanvasObject, update func(widget.TableCellID, fyne.CanvasObject), onOtherKey func(*fyne.KeyEvent), onSecondaryTap func(*fyne.PointEvent)) *keyTable {
@@ -252,6 +282,21 @@ func (t *keyTable) TappedSecondary(e *fyne.PointEvent) {
 	if t.onSecondaryTap != nil {
 		t.onSecondaryTap(e)
 	}
+}
+
+// MouseDown/MouseUp implement desktop.Mouseable so a Shift/Ctrl-click's
+// modifier state can be captured before Tapped fires: widget.Table's own
+// Tapped/Select/OnSelected chain (which drives handleTableTap) only ever
+// hands back a bare TableCellID, with no modifier info at all. The
+// modifier is stashed in pendingModifier and consumed by handleTableTap
+// immediately after, for exactly this one click.
+func (t *keyTable) MouseDown(e *desktop.MouseEvent) {
+	t.pendingModifier = e.Modifier
+	t.Table.MouseDown(e)
+}
+
+func (t *keyTable) MouseUp(e *desktop.MouseEvent) {
+	t.Table.MouseUp(e)
 }
 
 // Table column indices (Expanded view): Name, Ext, Size, Modified, Perm.
@@ -323,7 +368,7 @@ func (v *fileListView) buildTable() *keyTable {
 				v.onOtherKey(ev)
 			}
 		},
-		func(e *fyne.PointEvent) { v.offerAddCursorToFavorites(e.AbsolutePosition) },
+		func(e *fyne.PointEvent) { v.offerContextMenu(v.state.Cursor, e.AbsolutePosition) },
 	)
 	t.SetColumnWidth(colName, columnWidths[colName])
 	t.SetColumnWidth(colExt, columnWidths[colExt])
@@ -353,7 +398,7 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 		return
 	}
 
-	txt.Color = v.rowColor(cs, entry.Name)
+	txt.Color = v.rowColor(cs, entry)
 	check.Hidden = id.Col != colName || entry.Name == parentEntryName
 
 	switch id.Col {
@@ -438,11 +483,17 @@ func (v *fileListView) handleTableTap(id widget.TableCellID) {
 		v.onFocusGained()
 	}
 
+	mod := v.table.pendingModifier
+	v.table.pendingModifier = 0 // one-shot: don't let it leak into a later keyboard-driven OnSelected
+
+	// A double-click while Shift/Ctrl is held would mix "extend the
+	// selection" with "activate" — simpler and less surprising to just skip
+	// activation on a modified click.
 	now := time.Now()
-	isDouble := id.Row == v.lastTapRow && now.Sub(v.lastTapTime) < doubleTapWindow
+	isDouble := mod == 0 && id.Row == v.lastTapRow && now.Sub(v.lastTapTime) < doubleTapWindow
 	v.lastTapRow, v.lastTapTime = id.Row, now
 
-	v.state.Cursor = entry.Name
+	v.applyClickSelection(entry.Name, mod)
 	v.table.Refresh()
 	v.reportSelection()
 
@@ -459,6 +510,65 @@ func (v *fileListView) handleTableTap(id widget.TableCellID) {
 	}
 }
 
+// applyClickSelection updates cursor/selection/anchor for a click on name,
+// honoring Shift (range-select from the anchor) and Ctrl/Cmd (toggle just
+// this row) as an alternative to checkbox multi-select. A plain click never
+// touches Selected — unchanged from before shift/ctrl-click existed — so it
+// can't accidentally clear a selection built up via the checkboxes.
+func (v *fileListView) applyClickSelection(name string, mod fyne.KeyModifier) {
+	shift := mod&fyne.KeyModifierShift != 0
+	ctrl := mod&fyne.KeyModifierControl != 0 || mod&fyne.KeyModifierSuper != 0
+
+	switch {
+	case shift:
+		anchor := v.selectAnchor
+		if anchor == "" {
+			anchor = name
+		}
+		if !ctrl {
+			v.state.ClearSelection()
+		}
+		for _, n := range v.rangeBetween(anchor, name) {
+			if n == parentEntryName {
+				continue
+			}
+			v.state.Selected[n] = true
+		}
+	case ctrl:
+		v.state.ToggleSelect(name)
+		v.selectAnchor = name
+	default:
+		v.selectAnchor = name
+	}
+	v.state.Cursor = name
+}
+
+// rangeBetween returns every row's name between a and b (inclusive) in
+// current display order, regardless of which one comes first — Shift-click
+// works extending forward or backward from the anchor alike. A stale anchor
+// (e.g. left over from a directory since navigated away from) falls back to
+// just b, degrading to a plain single-row selection rather than erroring.
+func (v *fileListView) rangeBetween(a, b string) []string {
+	names := v.orderedNames()
+	ia, ib := indexOfName(names, a), indexOfName(names, b)
+	if ia < 0 || ib < 0 {
+		return []string{b}
+	}
+	if ia > ib {
+		ia, ib = ib, ia
+	}
+	return names[ia : ib+1]
+}
+
+func indexOfName(names []string, name string) int {
+	for i, n := range names {
+		if n == name {
+			return i
+		}
+	}
+	return -1
+}
+
 // ActivateCursor opens/navigates into the cursor row, same as a double-click
 // or Enter (see commander.go's doActivateCursor).
 func (v *fileListView) ActivateCursor() {
@@ -472,25 +582,30 @@ func (v *fileListView) ActivateCursor() {
 
 func (v *fileListView) buildBriefGrid() fyne.CanvasObject {
 	cs := v.colors()
-	names := v.orderedNames()
-	cells := make([]fyne.CanvasObject, len(names))
-	for i, name := range names {
-		cells[i] = v.buildBriefCell(name, cs)
+	n := v.rowCount()
+	cells := make([]fyne.CanvasObject, 0, n)
+	for row := 0; row < n; row++ {
+		entry, ok := v.entryAt(row)
+		if !ok {
+			continue
+		}
+		cells = append(cells, v.buildBriefCell(entry, cs))
 	}
 	grid := container.NewGridWrap(fyne.NewSize(180, 28), cells...)
 	return container.NewVScroll(grid)
 }
 
-func (v *fileListView) buildBriefCell(name string, cs ColorScheme) fyne.CanvasObject {
-	txt := canvas.NewText(name, v.rowColor(cs, name))
+func (v *fileListView) buildBriefCell(entry vfs.Entry, cs ColorScheme) fyne.CanvasObject {
+	name := entry.Name
+	txt := canvas.NewText(name, v.rowColor(cs, entry))
 	bg := canvas.NewRectangle(cs.PanelBG)
 	content := container.NewStack(bg, container.NewPadded(txt))
 
-	return newTappableCell(content, func() {
+	return newTappableCell(content, func(mod fyne.KeyModifier) {
 		if v.onFocusGained != nil {
 			v.onFocusGained()
 		}
-		v.state.Cursor = name
+		v.applyClickSelection(name, mod)
 		v.reportSelection()
 		v.renderActiveView()
 	}, func() {
@@ -501,7 +616,7 @@ func (v *fileListView) buildBriefCell(name string, cs ColorScheme) fyne.CanvasOb
 		v.reportSelection()
 		v.activateByName(name)
 	}, func(e *fyne.PointEvent) {
-		v.offerAddNameToFavorites(name, e.AbsolutePosition)
+		v.offerContextMenu(name, e.AbsolutePosition)
 	})
 }
 
@@ -518,25 +633,28 @@ func (v *fileListView) activateByName(name string) {
 	v.activate(entry)
 }
 
-// offerAddCursorToFavorites is the Table view's right-click handler: offers
-// to bookmark the cursor row if (and only if) it's a directory. See
-// keyTable.TappedSecondary's doc comment for why this acts on the cursor row
-// rather than whatever's precisely under the pointer.
-func (v *fileListView) offerAddCursorToFavorites(pos fyne.Position) {
-	v.offerAddNameToFavorites(v.state.Cursor, pos)
+// offerContextMenu is the right-click entry point for both view modes: the
+// Table view acts on the current cursor row (see keyTable.TappedSecondary's
+// doc comment for why), the Brief view's per-cell handler passes whatever's
+// exactly under the pointer. ".." is excluded — none of the context menu's
+// actions (open with, duplicate, trash, ...) make sense on the synthetic
+// parent row.
+func (v *fileListView) offerContextMenu(name string, pos fyne.Position) {
+	if v.onContextMenu == nil || name == "" || name == parentEntryName {
+		return
+	}
+	v.onContextMenu(name, pos)
 }
 
-// offerAddNameToFavorites is the Brief view's per-cell right-click handler
-// (see buildBriefCell) — name is exactly whatever's under the pointer there.
-func (v *fileListView) offerAddNameToFavorites(name string, pos fyne.Position) {
-	if v.onAddFavorite == nil || name == "" || name == parentEntryName {
-		return
-	}
+// entryAndPath resolves a row name (as seen by offerContextMenu) to its
+// vfs.Entry and full path within this view's current directory — the
+// commander-side context menu (contextmenu_ui.go) needs both.
+func (v *fileListView) entryAndPath(name string) (vfs.Entry, string, bool) {
 	entry, ok := entryByName(v.entries, name)
-	if !ok || !entry.IsDir {
-		return
+	if !ok {
+		return vfs.Entry{}, "", false
 	}
-	v.onAddFavorite(v.fs.Join(v.state.Path, entry.Name), entry.Name, pos)
+	return entry, v.fs.Join(v.state.Path, entry.Name), true
 }
 
 func entryByName(entries []vfs.Entry, name string) (vfs.Entry, bool) {
@@ -614,6 +732,32 @@ func (v *fileListView) ToggleSelectCursor() {
 	}
 	v.reportSelection()
 	v.Refresh()
+}
+
+// SelectAll selects every real entry in the current listing (Ctrl/Cmd+A,
+// and the pane toolbar's Select All/Deselect All button) — "..", if
+// present, is never selectable, same as the per-row checkboxes.
+func (v *fileListView) SelectAll() {
+	for _, e := range v.entries {
+		v.state.Selected[e.Name] = true
+	}
+	v.reportSelection()
+	v.Refresh()
+}
+
+// DeselectAll clears the current selection (Ctrl/Cmd+Shift+A, and the pane
+// toolbar's Select All/Deselect All button).
+func (v *fileListView) DeselectAll() {
+	v.state.ClearSelection()
+	v.reportSelection()
+	v.Refresh()
+}
+
+// HasSelection reports whether any row is currently selected — the pane
+// toolbar's single Select All/Deselect All button uses this to decide which
+// way to toggle next.
+func (v *fileListView) HasSelection() bool {
+	return len(v.state.Selected) > 0
 }
 
 // reportSelection tells the pane's status line about both the explicit
@@ -754,16 +898,20 @@ func humanSize(n int64) string {
 // tappable on their own, and implementing both Tappable and DoubleTappable
 // lets Fyne's own click-timing logic distinguish them (no manual timestamp
 // tracking needed here, unlike the table view where OnSelected gives no such
-// distinction).
+// distinction). It also implements desktop.Mouseable purely to capture
+// Shift/Ctrl state at click time — fyne.PointEvent (what Tapped receives)
+// carries no modifier info at all, same reason keyTable does the same for
+// the Table view.
 type tappableCell struct {
 	widget.BaseWidget
-	content        fyne.CanvasObject
-	onTap          func()
-	onDoubleTap    func()
-	onSecondaryTap func(*fyne.PointEvent)
+	content         fyne.CanvasObject
+	onTap           func(mod fyne.KeyModifier)
+	onDoubleTap     func()
+	onSecondaryTap  func(*fyne.PointEvent)
+	pendingModifier fyne.KeyModifier
 }
 
-func newTappableCell(content fyne.CanvasObject, onTap, onDoubleTap func(), onSecondaryTap func(*fyne.PointEvent)) *tappableCell {
+func newTappableCell(content fyne.CanvasObject, onTap func(fyne.KeyModifier), onDoubleTap func(), onSecondaryTap func(*fyne.PointEvent)) *tappableCell {
 	c := &tappableCell{content: content, onTap: onTap, onDoubleTap: onDoubleTap, onSecondaryTap: onSecondaryTap}
 	c.ExtendBaseWidget(c)
 	return c
@@ -773,9 +921,14 @@ func (c *tappableCell) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(c.content)
 }
 
+func (c *tappableCell) MouseDown(e *desktop.MouseEvent) { c.pendingModifier = e.Modifier }
+func (c *tappableCell) MouseUp(*desktop.MouseEvent)     {}
+
 func (c *tappableCell) Tapped(*fyne.PointEvent) {
 	if c.onTap != nil {
-		c.onTap()
+		mod := c.pendingModifier
+		c.pendingModifier = 0
+		c.onTap(mod)
 	}
 }
 

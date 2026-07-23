@@ -109,18 +109,6 @@ func (c *commander) favoritesMenuPos(p *pane) fyne.Position {
 	return fyne.NewPos(x, 60)
 }
 
-// showAddFavoriteMenu is the right-click "add to favorites" popup for a
-// single directory — see filelist.go's fileListView.onAddFavorite (wired
-// from keyTable.TappedSecondary for the Table view, and tappableCell's for
-// Brief).
-func (c *commander) showAddFavoriteMenu(path, label string, pos fyne.Position) {
-	menu := fyne.NewMenu("", fyne.NewMenuItem(`Add "`+label+`" to Favorites`, func() {
-		c.favorites.Add(label, path)
-		c.saveFavorites()
-	}))
-	widget.NewPopUpMenu(menu, c.win.Canvas()).ShowAtPosition(pos)
-}
-
 func (c *commander) showFavoritesMenu(p *pane) {
 	var items []*fyne.MenuItem
 

@@ -74,6 +74,23 @@ func (c *commander) registerShortcuts() {
 	// for "swap panes" (classic dual-pane-commander binding).
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyU, Modifier: desktop.ControlModifier},
 		func(fyne.Shortcut) { c.swapPanes() })
+
+	// Select All: Fyne's glfw driver already resolves fyne.ShortcutSelectAll
+	// to the platform's own primary modifier (Ctrl+A on Windows/Linux, Cmd+A
+	// on macOS — see window.go's triggersShortcut/ctrlMod), and only ever
+	// hands it to the canvas (rather than a focused Entry, e.g. a rename
+	// dialog) when nothing Shortcutable currently has focus — the same
+	// "don't hijack while typing" guarantee dispatchKey enforces manually
+	// for the F-keys, here for free.
+	c.win.Canvas().AddShortcut(&fyne.ShortcutSelectAll{}, func(fyne.Shortcut) { c.selectAllActive() })
+
+	// Deselect All has no Fyne built-in shortcut type, so register the
+	// literal Ctrl+Shift+A / Cmd+Shift+A combos directly (both modifiers are
+	// real, non-Shift-alone, so — like Ctrl+U — neither hits the
+	// triggersShortcut bug).
+	deselect := func(fyne.Shortcut) { c.deselectAllActive() }
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyA, Modifier: desktop.ControlModifier | desktop.ShiftModifier}, deselect)
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyA, Modifier: desktop.SuperModifier | desktop.ShiftModifier}, deselect)
 }
 
 // keyBarButton builds one function-key bar button with a tooltip explaining
@@ -127,6 +144,9 @@ func (c *commander) doOpenMenu() {
 	editorsItem := fyne.NewMenuItem("Editors", nil)
 	editorsItem.ChildMenu = c.buildEditorsSubmenu()
 
+	hiddenFilesItem := fyne.NewMenuItem("Show Hidden Files", func() { c.toggleHiddenFiles() })
+	hiddenFilesItem.Checked = c.showHiddenFiles
+
 	menu := fyne.NewMenu("",
 		fyne.NewMenuItem("New Tab (active pane)", func() {
 			p := c.activePane()
@@ -136,6 +156,7 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Full View", func() { c.activePane().setViewMode(panelstate.ViewExpanded) }),
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { c.swapPanes() }),
 		fyne.NewMenuItem("Calculate Folder Sizes", func() { c.doCalculateFolderSizes() }),
+		hiddenFilesItem,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Panel Colors…", func() {
 			showColorSchemeSettings(c.app, c.win, c.applyColorScheme)

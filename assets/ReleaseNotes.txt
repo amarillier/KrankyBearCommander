@@ -1,19 +1,84 @@
-Version 0.2.0 - July 21, 2026
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 Release notes
-KrankyBear Commander Application: - Windows, Linux and MacOS template application
+KrankyBear Commander: a free, cross-platform dual-pane file manager for Windows, Linux and macOS.
 
 Future ideas:
-- nothing specific planned for now
-- swap left and right panes
-- user file edit choice - built in or external and allow multiple for swicthing
-- Favorites button like nimble commander and easy right click add directories and volumes to favorites
-- Status bar at the bototm showing file or directory name, size, info - e.g. number of files in dir
-- Options for columns for file extension, permissions and ability to sort extension, or first by extension then by file name - ascending and descending
+- very useful feature - click file/directory name, second click to select name for easy inline rename capability - second click soon after selects name, not full name including extension to allow easy name renaming - only name selected
+- right click menu: compress selected file(s)/folder(s) into an archive, and copy to clipboard (open / open with / move to trash / duplicate shipped in 0.3.0). While true other OS components provide zip capability, this means I have to use Finder or Explorer to do that. Compress directly in commander for selected items, file(s) and directories is really useful - and I'd like to also provide options for both .zip and .7z, .tgz less valuable but would not be a bad third option. Anyway almost all Linux / Mac have easy zip and 7zip capabilities so tgz really adds nothing
+- drag from commander to other apps, drag from other and drop into commander to copy - maybe other keys e.g. shift drag / drop to move
+
+Later phase:
+- user ability to resize columns from fixed sizes, then also to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names
+- tags ability - colors - select one or more files, add colored icon. Debatable usefulness - nice quick visual maybe - or add icon capabilities instead for user manual / visual grouping
+- TotalCmd has a really nice file rename option for renaming with patterns, any case to title case, proper case etc. and regex replace patterns - activated by selecting file(s) and Ctrl M. This is really powerful and could use some images from Total Cmd running on a Win system to replicate
+
+Version 0.3.0 - July 23, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Right-click context menu on any file/directory row: Open, Open With
+   (your configured F4 external editors), Duplicate, Move to Trash, and
+   Reveal in Opposite Pane (same tab or a new one) — plus Add to Favorites
+   for directories.
+✨ NEW Show Hidden Files toggle (View menu / F9 popup) — dotfiles are
+   hidden by default; the choice persists across launches.
+✨ NEW Directories (and "..") get their own configurable text color in
+   Panel Colors, distinct from ordinary files.
+✨ NEW F7 New Folder prefills the cursor row's name so retyping part of it
+   is quick instead of typing a name from scratch.
+✨ NEW Swap Panes and Manage Editors… are now on the View/File menus, not
+   just the F9 popup.
+✨ NEW Shift-click range-selects between the anchor and clicked row; Ctrl
+   (⌘ on macOS)-click toggles just that row — an alternative to the
+   selection checkboxes for selecting many items at once.
+✨ NEW Select All (Ctrl+A / ⌘A) and Deselect All (Ctrl+Shift+A / ⌘⇧A),
+   plus a Select All/Deselect All toolbar button next to Favorites.
+
+Version 0.2.0 - July 21, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Calculate Folder Sizes (File menu / F9 popup) — du -s-style recursive
+   size for every directory in the active pane's listing (shown where the
+   Size column otherwise just said "<DIR>"), plus the current directory's
+   own total on the ".." row. Runs in the background with a cancelable
+   progress dialog.
+✨ NEW Swap Panes (Ctrl+U / popup menu) — exchange the left/right panes'
+   entire tab contents at once.
+✨ NEW Status bar shows the cursor item's name, size/modified time (or item
+   count for a directory), plus a live selection summary.
+✨ NEW Extension and Permissions columns in Full view; sorting by Extension
+   breaks ties by name (ascending/descending, like every other column).
+✨ NEW Favorites: a shared bookmark list plus your filesystem's volumes,
+   from a ★ button in each pane. Right-click any directory to bookmark it,
+   or use "Add Current Directory…" / "Manage Favorites…". Seeded on first
+   run with common folders (Desktop, Downloads, and Applications on macOS).
+✨ NEW External editor support for F4 — configure any number of external
+   editors (name + command) and pick a default (F9 → Editors), alongside
+   the built-in editor.
+✨ NEW Tooltips on every button (F-key row, pane toolbar, editor toolbar).
+✨ NEW About / Update-checker icons now scale to 256×256 instead of
+   rendering at the source PNG's native size (was blowing the windows up
+   far larger than intended); the 64×64 HardHat "ahead of the latest
+   release" badge now actually has a release to compare against.
+🐛 FIX Closing tabs after using "+" (new tab) could panic with an
+   out-of-range slice index — DocTabs' own "+" handler was double-appending
+   the new tab.
+🐛 FIX Double-click / Enter didn't navigate into directories — widget.Table
+   silently drops re-selecting an already-selected row, which ate the
+   second click of a double-click before it was ever seen.
+🐛 FIX F-keys (and Enter) stopped responding the moment any button, table
+   row, or other focusable control was clicked — a real Fyne bug
+   (canvas shortcuts never fire without a held modifier) meant our
+   keyboard dispatch had to bypass Fyne's shortcut system entirely and
+   hook raw key events instead, including inside the Table widget itself.
+🐛 FIX Launching a compiled executable by double-clicking it now runs it
+   directly and detached, instead of macOS's `open` wrapping it in a new
+   Terminal.app window (and dying with the file manager on quit).
+🐛 FIX Checking a row's selection checkbox (to multi-select before F5/F8/
+   etc.) silently ate the very next F-key press until clicking elsewhere in
+   the window first — same root cause as the F-key focus bug above, but for
+   the checkbox specifically (it grabs keyboard focus on tap, and its own
+   key handling is a no-op).
+- Bumped to version 0.2.0.
 
 Version 0.1.0 - July 21, 2026
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✨ NEW Cross platform multi-tab, dual pane file manager application
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
 - initial checkin

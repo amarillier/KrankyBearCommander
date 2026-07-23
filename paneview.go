@@ -25,12 +25,13 @@ type pane struct {
 	fs            vfs.FileSystem
 	win           fyne.Window
 	colors        func() ColorScheme
+	showHidden    func() bool // dotfile visibility — shared app-wide setting, see commander.toggleHiddenFiles
 	isActivePane  func() bool
 	onActivated   func() // this pane was clicked into; tell commander to make it active
 	onStatus      func(msg string)
-	onOtherKey    func(*fyne.KeyEvent)                        // forwarded to each tab's fileListView — see keyTable
-	onFavorites   func()                                      // Favorites button clicked; commander owns the shared list (favorites_ui.go)
-	onAddFavorite func(path, label string, pos fyne.Position) // right-click "add to favorites"; forwarded to each tab's fileListView
+	onOtherKey    func(*fyne.KeyEvent)                                              // forwarded to each tab's fileListView — see keyTable
+	onFavorites   func()                                                            // Favorites button clicked; commander owns the shared list (favorites_ui.go)
+	onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position) // right-click on a row; commander owns the menu (contextmenu_ui.go)
 
 	tabs   *container.DocTabs
 	views  []*fileListView
@@ -46,8 +47,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onAddFavorite func(path, label string, pos fyne.Position)) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onAddFavorite: onAddFavorite}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position)) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -72,7 +73,14 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, isAc
 	favBtn := ttwidget.NewButton("★", func() { p.onActivated(); p.onFavorites(); unfocus() })
 	favBtn.SetToolTip("Favorites: jump to a volume or bookmarked directory, or add/manage bookmarks")
 
-	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn)
+	selectAllBtn := ttwidget.NewButton("☑", func() {
+		p.onActivated()
+		p.toggleSelectAll()
+		unfocus()
+	})
+	selectAllBtn.SetToolTip("Select All / Deselect All (Ctrl+A / Ctrl+Shift+A, ⌘ on macOS)")
+
+	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn)
 
 	p.tabs = container.NewDocTabs()
 	p.tabs.CreateTab = func() *container.TabItem {
@@ -137,7 +145,7 @@ func (p *pane) defaultHome() string {
 // parallel slices (and eventually panicking on tab close with an
 // out-of-range slice index).
 func (p *pane) newTabItem(state *panelstate.State) *container.TabItem {
-	view := newFileListView(p.fs, state, p.colors, p.isActivePane)
+	view := newFileListView(p.fs, state, p.colors, p.showHidden, p.isActivePane)
 	p.bindView(view)
 
 	item := container.NewTabItem(tabLabel(state), view.Build())
@@ -157,7 +165,11 @@ func (p *pane) bindView(view *fileListView) {
 	view.onSelection = func(count int, size int64) { p.updateStatusLine(count, size) }
 	view.onCursorInfo = func(info string) { p.lastCursorInfo = info; p.renderStatusLine() }
 	view.onOtherKey = p.onOtherKey
-	view.onAddFavorite = p.onAddFavorite
+	view.onContextMenu = func(name string, pos fyne.Position) {
+		if p.onContextMenu != nil {
+			p.onContextMenu(p, view, name, pos)
+		}
+	}
 }
 
 // rebindViews re-binds every view p currently holds — called after
@@ -224,6 +236,23 @@ func (p *pane) activeState() *panelstate.State {
 func (p *pane) activateHome() {
 	if v := p.activeView(); v != nil {
 		v.Home(p.defaultHome())
+	}
+}
+
+// toggleSelectAll is the toolbar's Select All/Deselect All button: since
+// there's no persistent tri-state indicator, a selection already in
+// progress just gets cleared rather than topped up to "everything" — the
+// common cases (nothing selected -> select everything, anything selected ->
+// start over) both fall out of "toggle by whether anything is selected".
+func (p *pane) toggleSelectAll() {
+	v := p.activeView()
+	if v == nil {
+		return
+	}
+	if v.HasSelection() {
+		v.DeselectAll()
+	} else {
+		v.SelectAll()
 	}
 }
 
