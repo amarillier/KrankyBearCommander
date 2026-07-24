@@ -34,6 +34,7 @@ import (
 func (c *commander) fkeyActions() map[fyne.KeyName]func() {
 	return map[fyne.KeyName]func(){
 		fyne.KeyF1:     func() { showHelp(c.app) },
+		fyne.KeyF2:     c.doRefresh,
 		fyne.KeyF3:     c.doView,
 		fyne.KeyF4:     c.doEdit,
 		fyne.KeyF5:     c.doCopy,
@@ -113,8 +114,9 @@ func keyBarButton(canvas fyne.Canvas, label, tip string, action func()) *ttwidge
 // and keyboard always drive the same code path.
 func (c *commander) buildFunctionKeyBar() fyne.CanvasObject {
 	canvas := c.win.Canvas()
-	return container.NewGridWithColumns(10,
+	return container.NewGridWithColumns(11,
 		keyBarButton(canvas, "F1 Help", "Open the Help window", func() { showHelp(c.app) }),
+		keyBarButton(canvas, "F2 Refresh", "Re-read the active pane's directory from disk", c.doRefresh),
 		keyBarButton(canvas, "F3 View", "View the selected file (read-only)", c.doView),
 		keyBarButton(canvas, "F4 Edit", "Edit the selected file in the built-in text editor", c.doEdit),
 		keyBarButton(canvas, "F5 Copy", "Copy the selection to the other pane's directory", c.doCopy),
@@ -154,14 +156,17 @@ func (c *commander) doOpenMenu() {
 		}),
 		fyne.NewMenuItem("Brief View", func() { c.activePane().setViewMode(panelstate.ViewBrief) }),
 		fyne.NewMenuItem("Full View", func() { c.activePane().setViewMode(panelstate.ViewExpanded) }),
+		fyne.NewMenuItem("Refresh (F2)", func() { c.doRefresh() }),
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { c.swapPanes() }),
 		fyne.NewMenuItem("Calculate Folder Sizes", func() { c.doCalculateFolderSizes() }),
+		fyne.NewMenuItem("Search…", func() { c.showSearch(c.activePane()) }),
 		hiddenFilesItem,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Panel Colors…", func() {
 			showColorSchemeSettings(c.app, c.win, c.applyColorScheme)
 		}),
 		editorsItem,
+		fyne.NewMenuItem("7-Zip Binary Path…", func() { c.showSevenZipSettings() }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Help", func() { showHelp(c.app) }),
 		fyne.NewMenuItem("About", func() { showAbout(c.app) }),

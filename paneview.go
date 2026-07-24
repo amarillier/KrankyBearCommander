@@ -32,6 +32,7 @@ type pane struct {
 	onOtherKey    func(*fyne.KeyEvent)                                              // forwarded to each tab's fileListView — see keyTable
 	onFavorites   func()                                                            // Favorites button clicked; commander owns the shared list (favorites_ui.go)
 	onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position) // right-click on a row; commander owns the menu (contextmenu_ui.go)
+	onSearch      func()                                                            // Search button clicked; commander owns the search dialog (search_ui.go)
 
 	tabs   *container.DocTabs
 	views  []*fileListView
@@ -47,8 +48,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position)) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func()) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -80,7 +81,16 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	})
 	selectAllBtn.SetToolTip("Select All / Deselect All (Ctrl+A / Ctrl+Shift+A, ⌘ on macOS)")
 
-	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn)
+	searchBtn := ttwidget.NewButton("🔍", func() {
+		p.onActivated()
+		if p.onSearch != nil {
+			p.onSearch()
+		}
+		unfocus()
+	})
+	searchBtn.SetToolTip("Search this tab's directory recursively by name or pattern")
+
+	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn)
 
 	p.tabs = container.NewDocTabs()
 	p.tabs.CreateTab = func() *container.TabItem {

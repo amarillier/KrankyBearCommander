@@ -96,6 +96,8 @@ func (v *fileListView) Build() fyne.CanvasObject {
 // Reload re-reads the directory from disk, re-sorts, and re-renders whichever
 // view mode is active.
 func (v *fileListView) Reload() {
+	prevRowCount := v.rowCount()
+
 	v.computedSizes = nil
 	v.computedParentSize = nil
 	entries, err := v.fs.ReadDir(v.state.Path)
@@ -110,6 +112,21 @@ func (v *fileListView) Reload() {
 	}
 	v.entries = panelstate.SortEntries(entries, v.state.SortField, v.state.SortAscending)
 	v.hasParent = v.fs.Dir(v.state.Path) != v.state.Path
+
+	// widget.Table clamps the ROW INDEX it starts drawing from when a
+	// scrolled-down listing shrinks underneath it, but not the raw pixel
+	// scroll offset used to position that row — so a directory that changes
+	// size while a tab sits open and scrolled (e.g. an external process
+	// deleting/rewriting files) can leave the Table showing a stale blank
+	// gap with only a few rows/dividers rendered near the bottom, all
+	// pinned to where the old, longer listing used to be. Snapping back to
+	// the top on any row-count change sidesteps it; Brief view doesn't need
+	// this since it rebuilds its own scroll container from scratch every
+	// render (see renderActiveView).
+	if v.table != nil && v.rowCount() != prevRowCount {
+		v.table.ScrollToTop()
+	}
+
 	v.refreshHeaderLabels()
 	v.renderActiveView()
 	v.reportSelection()

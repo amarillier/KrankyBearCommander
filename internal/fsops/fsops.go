@@ -6,11 +6,13 @@
 package fsops
 
 import (
+	"archive/zip"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -174,6 +176,153 @@ func duplicateName(dir, base string) string {
 // Rename renames oldPath to newPath (F6 rename-in-place).
 func Rename(oldPath, newPath string) error {
 	return os.Rename(oldPath, newPath)
+}
+
+// Symlink creates a symbolic link at linkPath pointing to target
+// (right-click "Create Symbolic Link…").
+func Symlink(target, linkPath string) error {
+	return os.Symlink(target, linkPath)
+}
+
+// CompressName returns a non-colliding "<name>.<ext>" (single source) or
+// "Archive.<ext>"/"Archive N.<ext>" (multiple sources) destination path in
+// dir — mirrors Duplicate's own-non-colliding-name convention, since
+// compressing (like duplicating) creates its output alongside the
+// source(s) rather than in the other pane.
+func CompressName(dir string, sources []string, ext string) string {
+	base := "Archive"
+	if len(sources) == 1 {
+		b := filepath.Base(sources[0])
+		if trimmed := strings.TrimSuffix(b, filepath.Ext(b)); trimmed != "" {
+			base = trimmed
+		} else {
+			base = b
+		}
+	}
+	candidate := filepath.Join(dir, base+"."+ext)
+	for n := 2; ; n++ {
+		if _, err := os.Lstat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+		candidate = filepath.Join(dir, fmt.Sprintf("%s %d.%s", base, n, ext))
+	}
+}
+
+// Compress creates a zip archive at destZip containing each of sources
+// (files and/or directories, recursively), using each source's base name as
+// its root within the archive — the stdlib archive/zip path, always
+// available with no external dependency (compare CompressSevenZip, which
+// needs an actual 7z-capable binary).
+func Compress(sources []string, destZip string) error {
+	out, err := os.Create(destZip)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	zw := zip.NewWriter(out)
+	for _, src := range sources {
+		info, err := os.Lstat(src)
+		if err != nil {
+			zw.Close()
+			return err
+		}
+		base := filepath.Base(src)
+		if info.IsDir() {
+			err = addDirToZip(zw, src, base)
+		} else {
+			err = addFileToZip(zw, src, base, info)
+		}
+		if err != nil {
+			zw.Close()
+			return err
+		}
+	}
+	return zw.Close()
+}
+
+func addDirToZip(zw *zip.Writer, dir, archiveBase string) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		archivePath := archiveBase
+		if rel != "." {
+			archivePath = filepath.ToSlash(filepath.Join(archiveBase, rel))
+		}
+		if d.IsDir() {
+			_, err := zw.Create(archivePath + "/")
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		return addFileToZip(zw, path, archivePath, info)
+	})
+}
+
+func addFileToZip(zw *zip.Writer, path, archivePath string, info os.FileInfo) error {
+	hdr, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return err
+	}
+	hdr.Name = filepath.ToSlash(archivePath)
+	hdr.Method = zip.Deflate
+
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		return err
+	}
+	in, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	_, err = io.Copy(w, in)
+	return err
+}
+
+// sevenZipCandidates is the order 7z-capable binaries are looked up on PATH
+// when the user hasn't configured an explicit override — 7z (the full
+// p7zip/7-Zip CLI name on most systems), then the shorter names some
+// packages/builds use.
+var sevenZipCandidates = []string{"7z", "7za", "7zz"}
+
+// SevenZipAvailable reports whether a 7z-capable binary is usable, and its
+// path — override (a user-configured path, see commander's 7-Zip Binary
+// Path… setting) takes priority when non-empty; otherwise it's a PATH
+// lookup. Callers use this only to decide whether to offer "Compress to
+// .7z" in the UI at all.
+func SevenZipAvailable(override string) (string, bool) {
+	if override != "" {
+		if info, err := os.Stat(override); err == nil && !info.IsDir() {
+			return override, true
+		}
+		return "", false
+	}
+	for _, name := range sevenZipCandidates {
+		if path, err := exec.LookPath(name); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// CompressSevenZip shells out to binary (see SevenZipAvailable) to create a
+// .7z archive at destArchive containing each of sources — there is no
+// usable pure-Go .7z writer, unlike Compress's stdlib archive/zip path.
+func CompressSevenZip(binary string, sources []string, destArchive string) error {
+	args := append([]string{"a", destArchive}, sources...)
+	out, err := exec.Command(binary, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // Mkdir creates path, including any missing intermediate directories (F7;

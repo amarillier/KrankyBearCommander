@@ -67,6 +67,28 @@ func OpenWith(command, path string) error {
 	return cmd.Start()
 }
 
+// RevealInFileManager opens the OS's native file manager (Finder, Explorer,
+// or the desktop's default file manager on Linux) with path highlighted —
+// "Reveal in File Manager" in the right-click context menu. macOS and
+// Windows both support selecting the specific item within its parent
+// folder; Linux has no universal "select this file" command, so isDir
+// decides whether to open the item itself (a directory) or its parent (a
+// file) instead.
+func RevealInFileManager(path string, isDir bool) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", "-R", path).Start()
+	case "windows":
+		return exec.Command("explorer", "/select,"+path).Start()
+	default:
+		target := path
+		if !isDir {
+			target = filepath.Dir(path)
+		}
+		return exec.Command("xdg-open", target).Start()
+	}
+}
+
 func openWithDefaultApp(path string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

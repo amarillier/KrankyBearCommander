@@ -116,8 +116,10 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	editorsItem := fyne.NewMenuItem("Manage Editors…", func() { cmdr.showManageEditors() })
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
+		fyne.NewMenuItem("Search… (active pane)", func() { cmdr.showSearch(cmdr.activePane()) }),
 		fyne.NewMenuItemSeparator(),
 		editorsItem,
+		fyne.NewMenuItem("7-Zip Binary Path…", func() { cmdr.showSevenZipSettings() }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", func() { fyne.Do(func() { quitApp(a, win) }) }),
 	)
@@ -129,6 +131,7 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	viewMenu := fyne.NewMenu("View",
 		fyne.NewMenuItem("Brief View (active pane)", func() { cmdr.activePane().setViewMode(panelstate.ViewBrief) }),
 		fyne.NewMenuItem("Full View (active pane)", func() { cmdr.activePane().setViewMode(panelstate.ViewExpanded) }),
+		fyne.NewMenuItem("Refresh (active pane) (F2)", func() { cmdr.doRefresh() }),
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { cmdr.swapPanes() }),
 		hiddenFilesItem,
 		fyne.NewMenuItem("Panel Colors…", func() { showColorSchemeSettings(a, win, cmdr.applyColorScheme) }),

@@ -25,6 +25,19 @@ func (c *commander) inactivePaneOf(p *pane) *pane {
 	return c.left
 }
 
+// ── F2 Refresh ───────────────────────────────────────────────────────────────
+
+// doRefresh re-reads the active pane's current directory from disk — the
+// only way to force this short of navigating away and back, e.g. after an
+// external process has changed the directory's contents while the tab sat
+// open (see Reload's ScrollToTop doc comment for the stale-listing artifact
+// this also guards against).
+func (c *commander) doRefresh() {
+	if v := c.activePane().activeView(); v != nil {
+		v.Reload()
+	}
+}
+
 // ── F5 Copy ──────────────────────────────────────────────────────────────────
 
 func (c *commander) doCopy() {

@@ -34,6 +34,7 @@ type commander struct {
 	favorites       favorites.List // shared across both panes — see favorites_ui.go
 	editorConfig    editors.Config // F4 preference — see editors_ui.go
 	showHiddenFiles bool           // dotfile visibility, shared across both panes — see toggleHiddenFiles
+	sevenZipPath    string         // optional 7z/7za/7zz binary override — see archive_ui.go
 
 	left  *pane
 	right *pane
@@ -51,9 +52,10 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 
 	c.loadFavorites()
 	c.loadEditors()
+	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu)
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) })
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) })
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5

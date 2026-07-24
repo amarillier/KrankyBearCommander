@@ -1,6 +1,8 @@
 package fsops
 
 import (
+	"archive/zip"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -307,6 +309,109 @@ func TestDuplicateDirectory(t *testing.T) {
 	}
 	if got := mustReadFile(t, filepath.Join(dest, "sub", "nested.txt")); got != "nested" {
 		t.Fatalf("duplicated nested content = %q, want nested", got)
+	}
+}
+
+func TestSymlink(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "a.txt"), "hello")
+
+	link := filepath.Join(dir, "a-link.txt")
+	if err := Symlink(filepath.Join(dir, "a.txt"), link); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustReadFile(t, link); got != "hello" {
+		t.Fatalf("reading through the symlink = %q, want hello", got)
+	}
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != filepath.Join(dir, "a.txt") {
+		t.Fatalf("link target = %q, want %q", target, filepath.Join(dir, "a.txt"))
+	}
+}
+
+func mustReadZipEntry(t *testing.T, zipPath, name string) string {
+	t.Helper()
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		if f.Name != name {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rc.Close()
+		b, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	t.Fatalf("zip entry %q not found in %s", name, zipPath)
+	return ""
+}
+
+func TestCompressFile(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "a.txt"), "hello")
+	destZip := filepath.Join(dir, "out.zip")
+
+	if err := Compress([]string{filepath.Join(dir, "a.txt")}, destZip); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustReadZipEntry(t, destZip, "a.txt"); got != "hello" {
+		t.Fatalf("zipped content = %q, want hello", got)
+	}
+}
+
+func TestCompressDirectoryRecursive(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "proj", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(dir, "proj", "top.txt"), "top")
+	mustWriteFile(t, filepath.Join(dir, "proj", "sub", "nested.txt"), "nested")
+	destZip := filepath.Join(dir, "out.zip")
+
+	if err := Compress([]string{filepath.Join(dir, "proj")}, destZip); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustReadZipEntry(t, destZip, "proj/top.txt"); got != "top" {
+		t.Fatalf("proj/top.txt = %q, want top", got)
+	}
+	if got := mustReadZipEntry(t, destZip, "proj/sub/nested.txt"); got != "nested" {
+		t.Fatalf("proj/sub/nested.txt = %q, want nested", got)
+	}
+}
+
+func TestCompressNameSingleSource(t *testing.T) {
+	dir := t.TempDir()
+	got := CompressName(dir, []string{filepath.Join(dir, "report.txt")}, "zip")
+	if want := filepath.Join(dir, "report.zip"); got != want {
+		t.Fatalf("CompressName = %q, want %q", got, want)
+	}
+}
+
+func TestCompressNameMultipleSourcesAndCollision(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "Archive.zip"), "existing")
+
+	got := CompressName(dir, []string{filepath.Join(dir, "a.txt"), filepath.Join(dir, "b.txt")}, "zip")
+	if want := filepath.Join(dir, "Archive 2.zip"); got != want {
+		t.Fatalf("CompressName = %q, want %q", got, want)
+	}
+}
+
+func TestSevenZipAvailableOverrideMissing(t *testing.T) {
+	if _, ok := SevenZipAvailable(filepath.Join(t.TempDir(), "no-such-binary")); ok {
+		t.Fatal("expected a nonexistent override path to report unavailable")
 	}
 }
 

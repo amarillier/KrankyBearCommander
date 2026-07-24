@@ -70,6 +70,9 @@ VIEW MODES & SORTING:
 FUNCTION KEYS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 F1  Help                 This window.
+F2  Refresh               Re-reads the active pane's directory from disk —
+                          useful if something else changed it on disk while
+                          the tab sat open.
 F3  View                 Read-only viewer — text, or a hex dump for
                           anything that looks binary.
 F4  Edit                 Opens the built-in text editor, or your chosen
@@ -81,12 +84,15 @@ F6  Move / Rename        Multiple items move to the other pane's directory;
                           a single item shows an editable path — change the
                           name for a rename, the directory for a move, or
                           both at once.
-F7  MkDir                 Creates a new folder in the active pane.
+F7  MkDir                 Creates a new folder in the active pane, prefilled
+                          with the cursor row's name so retyping part of it
+                          is quick.
 F8  Delete                Sends the selection to the trash.
 ⇧F8 Delete Permanently    Bypasses the trash — cannot be undone. Mouse/menu
                           only (see KNOWN LIMITATIONS).
-F9  Menu                  New tab, view mode, Swap Panes, Panel Colors,
-                          Editors, Help, About.
+F9  Menu                  New tab, view mode, Refresh, Swap Panes, Calculate
+                          Folder Sizes, Search, Show Hidden Files, Panel
+                          Colors, Editors, 7-Zip Binary Path, Help, About.
 F10 Quit                  Quits ` + appName + `.
 Enter                     Opens/navigates into the cursor row, same as a
                           double-click.
@@ -98,9 +104,37 @@ Double-click               A directory navigates into it; a file opens with
 
 SELECTING FILES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Click a row to move the cursor there; use the checkbox beside a Name to add
-it to the multi-selection used by Copy/Move/Delete. With nothing explicitly
-selected, F-key operations act on just the cursor row.
+• Click a row to move the cursor there; use the checkbox beside a Name to
+  add it to the multi-selection used by Copy/Move/Delete/Compress. With
+  nothing explicitly selected, these operations act on just the cursor row.
+• Shift-click selects every row between the anchor (the last plain- or
+  Ctrl/Cmd-clicked row) and the one you click, replacing the current
+  selection — an alternative to the checkboxes for selecting many items at
+  once. Ctrl-click (⌘-click on macOS) toggles just the clicked row and moves
+  the anchor there, so a following Shift-click extends from it; Shift+Ctrl-
+  click adds a range to the existing selection instead of replacing it.
+• Select All (Ctrl+A / ⌘A) and Deselect All (Ctrl+Shift+A / ⌘⇧A), or the ☑
+  toolbar button, which toggles between the two based on whether anything's
+  currently selected.
+
+RIGHT-CLICK MENU:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Right-click any file or directory row for: Open; Open With (your configured
+external editors, see EDITORS below); Duplicate (copies it alongside itself
+as "name copy", "name copy 2", …); Move to Trash; Copy Name / Copy Path
+(to the clipboard, as text); Compress (To .zip, always available, or To
+.7z — see COMPRESSING below); Create Symbolic Link… (defaults to the
+opposite pane's directory, same name); Reveal in File Manager (opens
+Finder/Explorer/your Linux file manager with the item selected); Reveal in
+Opposite Pane / Reveal in Opposite Pane (New Tab); and, for directories,
+Add to Favorites. Compress acts on the whole current selection (or just the
+cursor row); everything else here acts on whichever row you right-clicked.
+
+COMPRESSING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+.zip needs nothing extra. .7z only appears as an option when a 7z-capable
+binary (7z, 7za, or 7zz) is found on your PATH, or one you've pointed at
+explicitly via File → 7-Zip Binary Path… — there's no bundled .7z writer.
 
 FAVORITES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -120,15 +154,38 @@ Change the default, or add/remove external editors, from F9 → Editors.
 
 PANEL COLORS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The pane colors (background, normal/selected/cursor-row text) default to a
-Norton-Commander-style scheme and are fully customizable — F9 → Panel
-Colors, or View → Panel Colors — independent of the Light/Dark/System app
-theme (View menu), which governs the rest of the app's chrome.
+The pane colors (background, normal/selected/cursor-row/directory text)
+default to a Norton-Commander-style scheme and are fully customizable —
+F9 → Panel Colors, or View → Panel Colors — independent of the
+Light/Dark/System app theme (View menu), which governs the rest of the
+app's chrome. Directories (and "..") use their own color so they stand out
+from ordinary files at a glance.
+
+HIDDEN FILES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Dotfiles are hidden by default. Toggle Show Hidden Files from the View menu
+or F9 popup — the choice applies to both panes and persists across
+launches.
+
+FOLDER SIZES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Calculate Folder Sizes (File menu / F9 popup) walks every directory in the
+active pane's listing and fills in its real recursive size where the Size
+column otherwise just shows "<DIR>", plus the current directory's own
+total on the ".." row. Runs in the background with a cancelable progress
+dialog.
+
+SEARCH:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The 🔍 toolbar button (or File menu / F9 popup → Search…) recursively
+searches the active tab's directory by plain substring or a */? wildcard
+pattern. Picking a match from the results list opens its location in a new
+tab with the file selected as the cursor.
 
 SMART FEATURES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ Tab/pane/window layout, panel colors, favorites, and editor choice all
-   persist across launches.
+✨ Tab/pane/window layout, panel colors, favorites, editor choice, hidden-
+   files visibility, and the 7-Zip binary path all persist across launches.
 ✨ Copy/Move run in the background with a progress dialog and
    Overwrite/Skip/Rename/Cancel conflict handling (with "apply to all").
 ✨ Theme Support: Light, Dark, or System theme (View menu) - matches your
@@ -137,8 +194,10 @@ SMART FEATURES:
 
 KEYBOARD SHORTCUTS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• F1, F3-F10 - see FUNCTION KEYS above.
+• F1-F10 - see FUNCTION KEYS above.
 • Ctrl+U - Swap Panes.
+• Ctrl+A / ⌘A - Select All. Ctrl+Shift+A / ⌘⇧A - Deselect All.
+• Shift-click / Ctrl-click (⌘-click on macOS) - see SELECTING FILES above.
 • Enter - Open/navigate into the cursor row.
 • Cmd/Ctrl+Q - Quit
 • Cmd/Ctrl+W - Close window
@@ -150,10 +209,14 @@ KNOWN LIMITATIONS:
   key events don't carry modifier state, so it can't be told apart from
   plain F8 via the keyboard. Fitting, really, for a "bypass the trash"
   action.
-• Arrow-key row navigation and the right-click "Add to Favorites" menu are
-  most precise in Full view; Brief view's per-cell right-click is exact,
-  but the Full view's context menu acts on the current cursor row rather
-  than pixel-precise position.
+• Arrow-key row navigation and the right-click menu are most precise in
+  Full view; Brief view's per-cell right-click is exact, but Full view's
+  context menu acts on the current cursor row rather than pixel-precise
+  position — left-click a row first, then right-click anywhere on the
+  table for its context menu.
+• On macOS, F2 may be mapped to a hardware brightness key by default —
+  either hold Fn, or enable "Use F1, F2, etc. as standard function keys"
+  in System Settings → Keyboard, to use it for Refresh.
 
 MORE INFORMATION:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
