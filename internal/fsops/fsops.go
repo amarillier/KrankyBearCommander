@@ -184,6 +184,22 @@ func Symlink(target, linkPath string) error {
 	return os.Symlink(target, linkPath)
 }
 
+// SymlinkName returns a non-colliding "<dir>/link-<base>", or "<dir>/link-
+// <stem> N<ext>" for the first N>=2 that doesn't already exist — the
+// default suggested when creating a symbolic link, alongside the source in
+// the same directory.
+func SymlinkName(dir, base string) string {
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	candidate := filepath.Join(dir, "link-"+stem+ext)
+	for n := 2; ; n++ {
+		if _, err := os.Lstat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+		candidate = filepath.Join(dir, fmt.Sprintf("link-%s %d%s", stem, n, ext))
+	}
+}
+
 // CompressName returns a non-colliding "<name>.<ext>" (single source) or
 // "Archive.<ext>"/"Archive N.<ext>" (multiple sources) destination path in
 // dir — mirrors Duplicate's own-non-colliding-name convention, since

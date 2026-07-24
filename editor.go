@@ -25,7 +25,11 @@ import (
 // built-in editor below, or one of the configured external editors, spawned
 // detached with the file path as its last argument.
 func (c *commander) doEdit() {
-	paths := c.activePane().activeView().SelectionOrCursor()
+	view := c.activePane().activeView()
+	if c.blockIfArchive(view) {
+		return
+	}
+	paths := view.SelectionOrCursor()
 	if len(paths) == 0 {
 		c.showStatus("select a file to edit")
 		return

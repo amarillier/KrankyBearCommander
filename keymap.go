@@ -92,6 +92,12 @@ func (c *commander) registerShortcuts() {
 	deselect := func(fyne.Shortcut) { c.deselectAllActive() }
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyA, Modifier: desktop.ControlModifier | desktop.ShiftModifier}, deselect)
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyA, Modifier: desktop.SuperModifier | desktop.ShiftModifier}, deselect)
+
+	// Copy/Paste real files to/from the OS clipboard (see clipboard_ui.go):
+	// same free "defers to a focused Entry" behavior as Select All above,
+	// via Fyne's own built-in fyne.ShortcutCopy/ShortcutPaste types.
+	c.win.Canvas().AddShortcut(&fyne.ShortcutCopy{}, func(fyne.Shortcut) { c.doCopyToClipboard() })
+	c.win.Canvas().AddShortcut(&fyne.ShortcutPaste{}, func(fyne.Shortcut) { c.doPaste() })
 }
 
 // keyBarButton builds one function-key bar button with a tooltip explaining
@@ -110,6 +116,19 @@ func keyBarButton(canvas fyne.Canvas, label, tip string, action func()) *ttwidge
 	return b
 }
 
+// menuKeyBarButton is keyBarButton's counterpart for F9 specifically: its
+// action shows a popup menu that Fyne has already focused for us by the
+// time ShowAtPosition returns (proven by the fact keyboard-triggered F9
+// already closes cleanly with Escape), so unfocusing afterward — right for
+// every other F-key button, which don't leave an interactive overlay
+// behind — would immediately undo that and strand the popup neither
+// focused (Escape/F9 do nothing) nor closed (still needs a second click).
+func menuKeyBarButton(label, tip string, action func()) *ttwidget.Button {
+	b := ttwidget.NewButton(label, action)
+	b.SetToolTip(tip)
+	return b
+}
+
 // buildFunctionKeyBar is the on-screen mirror of registerShortcuts, so mouse
 // and keyboard always drive the same code path.
 func (c *commander) buildFunctionKeyBar() fyne.CanvasObject {
@@ -124,7 +143,7 @@ func (c *commander) buildFunctionKeyBar() fyne.CanvasObject {
 		keyBarButton(canvas, "F7 MkDir", "Create a new folder in the active pane", c.doMkdir),
 		keyBarButton(canvas, "F8 Delete", "Send the selection to the trash", c.doDeleteTrash),
 		keyBarButton(canvas, "⇧F8 Del!", "Permanently delete the selection — bypasses the trash, cannot be undone", c.doDeletePermanent),
-		keyBarButton(canvas, "F9 Menu", "Open the popup menu (new tab, view mode, panel colors, help)", c.doOpenMenu),
+		menuKeyBarButton("F9 Menu", "Open the popup menu (new tab, view mode, panel colors, help)", c.doOpenMenu),
 		keyBarButton(canvas, "F10 Quit", "Quit "+appName, func() { fyne.Do(func() { quitApp(c.app, c.win) }) }),
 	)
 }
@@ -160,6 +179,8 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { c.swapPanes() }),
 		fyne.NewMenuItem("Calculate Folder Sizes", func() { c.doCalculateFolderSizes() }),
 		fyne.NewMenuItem("Search…", func() { c.showSearch(c.activePane()) }),
+		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { c.doCopyToClipboard() }),
+		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { c.doPaste() }),
 		hiddenFilesItem,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Panel Colors…", func() {
@@ -169,6 +190,7 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("7-Zip Binary Path…", func() { c.showSevenZipSettings() }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Help", func() { showHelp(c.app) }),
+		fyne.NewMenuItem("Check for Updates", func() { checkForUpdatesManual(c.app) }),
 		fyne.NewMenuItem("About", func() { showAbout(c.app) }),
 	)
 	pos := fyne.NewPos(c.win.Canvas().Size().Width/2, c.win.Canvas().Size().Height-80)

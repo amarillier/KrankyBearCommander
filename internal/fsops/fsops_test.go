@@ -409,6 +409,24 @@ func TestCompressNameMultipleSourcesAndCollision(t *testing.T) {
 	}
 }
 
+func TestSymlinkNameDefault(t *testing.T) {
+	dir := t.TempDir()
+	got := SymlinkName(dir, "photo.jpg")
+	if want := filepath.Join(dir, "link-photo.jpg"); got != want {
+		t.Fatalf("SymlinkName = %q, want %q", got, want)
+	}
+}
+
+func TestSymlinkNameCollisionIncrements(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "link-photo.jpg"), "existing")
+
+	got := SymlinkName(dir, "photo.jpg")
+	if want := filepath.Join(dir, "link-photo 2.jpg"); got != want {
+		t.Fatalf("SymlinkName = %q, want %q", got, want)
+	}
+}
+
 func TestSevenZipAvailableOverrideMissing(t *testing.T) {
 	if _, ok := SevenZipAvailable(filepath.Join(t.TempDir(), "no-such-binary")); ok {
 		t.Fatal("expected a nonexistent override path to report unavailable")

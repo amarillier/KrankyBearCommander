@@ -54,8 +54,8 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.loadEditors()
 	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) })
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) })
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, c.openArchivedMember)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, c.openArchivedMember)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5

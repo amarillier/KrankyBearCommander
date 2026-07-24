@@ -19,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"commander/internal/panelstate"
+	"commander/internal/vfs/zipfs"
 )
 
 type searchMatch struct {
@@ -32,6 +33,12 @@ func (c *commander) showSearch(p *pane) {
 	state := p.activeState()
 	if state == nil {
 		return
+	}
+	if view := p.activeView(); view != nil {
+		if _, insideArchive := view.fs.(*zipfs.FS); insideArchive {
+			c.showStatus("search isn't available inside archives")
+			return
+		}
 	}
 	root := state.Path
 

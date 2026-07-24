@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"commander/internal/fsops"
+	"commander/internal/vfs/zipfs"
 )
 
 func (c *commander) inactivePaneOf(p *pane) *pane {
@@ -23,6 +24,23 @@ func (c *commander) inactivePaneOf(p *pane) *pane {
 		return c.right
 	}
 	return c.left
+}
+
+// blockIfArchive reports (and refuses) any operation that would need to
+// mutate an open archive in place — F4 Edit, Move/Rename, MkDir, Delete.
+// Only F5 Copy (repurposed as Extract, see doCopy) and F3 View (see
+// viewer.go) make sense while browsing one. A modal rather than the status
+// bar: the status bar sits at the bottom of the whole window competing with
+// the per-pane status line right above it, easy to miss, and — unlike a
+// dialog the user dismisses — it has no natural moment to clear itself, so
+// it would otherwise sit there looking current after refreshing, switching
+// tabs, or navigating back out of the archive entirely.
+func (c *commander) blockIfArchive(view *fileListView) bool {
+	if _, ok := view.fs.(*zipfs.FS); ok {
+		dialog.ShowInformation("Read-Only Archive", "This archive is read-only — extract with F5 to make changes.", c.win)
+		return true
+	}
+	return false
 }
 
 // ── F2 Refresh ───────────────────────────────────────────────────────────────
@@ -42,7 +60,8 @@ func (c *commander) doRefresh() {
 
 func (c *commander) doCopy() {
 	src := c.activePane()
-	paths := src.activeView().SelectionOrCursor()
+	view := src.activeView()
+	paths := view.SelectionOrCursor()
 	if len(paths) == 0 {
 		c.showStatus("nothing to copy")
 		return
@@ -52,6 +71,19 @@ func (c *commander) doCopy() {
 		return
 	}
 	target := dst.Path
+
+	// Browsing inside an archive: F5 extracts instead of copying — there's
+	// nothing real at these paths for fsops.Copy's os.* calls to find.
+	if zfs, ok := view.fs.(*zipfs.FS); ok {
+		dialog.NewConfirm("Extract", fmt.Sprintf("Extract %d item(s) to:\n%s", len(paths), target), func(ok bool) {
+			if !ok {
+				return
+			}
+			c.runFileOp("Extracting", paths, target, zfs.Extract, src)
+		}, c.win).Show()
+		return
+	}
+
 	dialog.NewConfirm("Copy", fmt.Sprintf("Copy %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 		if !ok {
 			return
@@ -69,6 +101,9 @@ func (c *commander) doCopy() {
 
 func (c *commander) doMoveOrRename() {
 	src := c.activePane()
+	if c.blockIfArchive(src.activeView()) {
+		return
+	}
 	paths := src.activeView().SelectionOrCursor()
 	if len(paths) == 0 {
 		c.showStatus("nothing to move")
@@ -118,6 +153,9 @@ func (c *commander) performRename(oldPath, newPath string, sourcePane *pane) {
 
 func (c *commander) doMkdir() {
 	p := c.activePane()
+	if c.blockIfArchive(p.activeView()) {
+		return
+	}
 	state := p.activeState()
 	if state == nil {
 		return
@@ -156,6 +194,9 @@ func (c *commander) doDeletePermanent() { c.doDelete(true) }
 
 func (c *commander) doDelete(permanent bool) {
 	p := c.activePane()
+	if c.blockIfArchive(p.activeView()) {
+		return
+	}
 	paths := p.activeView().SelectionOrCursor()
 	if len(paths) == 0 {
 		c.showStatus("nothing to delete")

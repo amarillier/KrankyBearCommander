@@ -15,11 +15,34 @@ fixing and performance work.
   snap back to the locked root).
 - **Brief and Full (detailed) views** — Brief is a compact, name-only wrapped
   grid; Full adds sortable Name / Ext / Size / Modified / Permissions
-  columns (click a header to sort, click again to reverse).
-- **Classic F-key row**: F1 Help, F3 View, F4 Edit, F5 Copy, F6 Move/Rename,
-  F7 MkDir, F8 Delete (to trash), Shift+F8 delete permanently, F9 menu, F10
-  Quit — both as on-screen buttons and real keyboard shortcuts, with tooltips
-  on every button.
+  columns (click a header to sort, click again to reverse). Directories
+  (and `..`) get their own configurable text color, distinct from files.
+- **Classic F-key row**: F1 Help, F2 Refresh, F3 View, F4 Edit, F5 Copy, F6
+  Move/Rename, F7 MkDir, F8 Delete (to trash), Shift+F8 delete permanently,
+  F9 menu, F10 Quit — both as on-screen buttons and real keyboard shortcuts,
+  with tooltips on every button.
+- **Selecting files**: checkboxes, Shift-click range-select, Ctrl/Cmd-click
+  toggle, and Select All/Deselect All (Ctrl+A / Ctrl+Shift+A, or the ☑
+  toolbar button). Click an already-selected row's name again (slower than
+  a double-click) to **rename it in place**.
+- **Right-click context menu**: Open, Open With (your configured external
+  editors), Duplicate, Move to Trash, Copy/Paste (real files, to/from the OS
+  clipboard) or Copy Name/Path (as text), Compress (to .zip, or .7z if a
+  7z-capable binary is available), Create Symbolic Link…, Reveal in File
+  Manager, Reveal in Opposite Pane, and Add to Favorites for directories.
+- **Native OS clipboard and drag-in**: Ctrl/Cmd+C copies the selection as
+  real files — Paste into Finder/Explorer/Nautilus copies them there for
+  real; Ctrl/Cmd+V does the reverse. Implemented as native platform code
+  (Cocoa/Win32/xclip) rather than osascript or PowerShell. You can also drag
+  files from your OS file manager and drop them onto a pane to copy them in.
+- **Browse into .zip archives** — double-click a .zip to browse it like a
+  real directory (tabs, sorting, selection all work); F5 extracts instead of
+  copying, F3 previews a file (or lets you pick one to preview without fully
+  browsing in), and mutating operations refuse cleanly since archives are
+  read-only.
+- **Recursive search** (🔍 toolbar button) by name or `*`/`?` wildcard
+  pattern within the active tab's directory; picking a match opens its
+  location in a new tab with the file selected.
 - **Built-in viewer and editor** (F3/F4) — text or a hex dump for binary
   files, and a simple text editor with Save/Save As. F4 can also launch any
   number of **external editors** you configure (name + command); pick the
@@ -30,6 +53,8 @@ fixing and performance work.
   common folders (Desktop, Downloads, and Applications on macOS).
 - **Swap Panes** (Ctrl+U or the popup menu) — exchange the left and right
   panes' entire tab contents at once.
+- **Show Hidden Files** toggle (View menu / F9 popup) — persists across
+  launches.
 - **Status bar** showing the cursor item's name, size/modified time (or item
   count for a directory), plus a live selection summary.
 - **Customizable panel colors** — defaults to a Norton-Commander-style

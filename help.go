@@ -92,7 +92,8 @@ F8  Delete                Sends the selection to the trash.
                           only (see KNOWN LIMITATIONS).
 F9  Menu                  New tab, view mode, Refresh, Swap Panes, Calculate
                           Folder Sizes, Search, Show Hidden Files, Panel
-                          Colors, Editors, 7-Zip Binary Path, Help, About.
+                          Colors, Editors, 7-Zip Binary Path, Help, Check
+                          for Updates, About.
 F10 Quit                  Quits ` + appName + `.
 Enter                     Opens/navigates into the cursor row, same as a
                           double-click.
@@ -107,6 +108,10 @@ SELECTING FILES:
 • Click a row to move the cursor there; use the checkbox beside a Name to
   add it to the multi-selection used by Copy/Move/Delete/Compress. With
   nothing explicitly selected, these operations act on just the cursor row.
+• Click an already-selected/cursor row's name again — slower than a
+  double-click, which still opens/navigates as usual — to rename it in
+  place. Enter commits, Escape or clicking away cancels; the extension is
+  hidden while editing and silently reattached unless you type your own.
 • Shift-click selects every row between the anchor (the last plain- or
   Ctrl/Cmd-clicked row) and the one you click, replacing the current
   selection — an alternative to the checkboxes for selecting many items at
@@ -121,20 +126,47 @@ RIGHT-CLICK MENU:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Right-click any file or directory row for: Open; Open With (your configured
 external editors, see EDITORS below); Duplicate (copies it alongside itself
-as "name copy", "name copy 2", …); Move to Trash; Copy Name / Copy Path
-(to the clipboard, as text); Compress (To .zip, always available, or To
-.7z — see COMPRESSING below); Create Symbolic Link… (defaults to the
-opposite pane's directory, same name); Reveal in File Manager (opens
-Finder/Explorer/your Linux file manager with the item selected); Reveal in
-Opposite Pane / Reveal in Opposite Pane (New Tab); and, for directories,
-Add to Favorites. Compress acts on the whole current selection (or just the
-cursor row); everything else here acts on whichever row you right-clicked.
+as "name copy", "name copy 2", …); Move to Trash; Copy (real files, to the
+OS clipboard — see COPY/PASTE & DRAG-IN below) / Paste (into this
+directory) / Copy Name / Copy Path (as text); Compress (To .zip, always
+available, or To .7z — see COMPRESSING below); Create Symbolic Link…
+(defaults to "link-<name>" alongside the source, name pre-selected);
+Reveal in File Manager (opens Finder/Explorer/your Linux file manager with
+the item selected); Reveal in Opposite Pane / Reveal in Opposite Pane (New
+Tab); and, for directories, Add to Favorites. Compress acts on the whole
+current selection (or just the cursor row); Paste acts on this row's
+directory regardless of which row you right-clicked; everything else here
+acts on whichever row you right-clicked.
+Inside an open archive this menu is much shorter — see BROWSING ARCHIVES.
 
 COMPRESSING:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 .zip needs nothing extra. .7z only appears as an option when a 7z-capable
 binary (7z, 7za, or 7zz) is found on your PATH, or one you've pointed at
 explicitly via File → 7-Zip Binary Path… — there's no bundled .7z writer.
+
+BROWSING ARCHIVES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Double-click a .zip to browse straight into it, exactly like a real
+directory — tabs, sorting, view modes, and selection all work the same
+way. ".." at the archive's own root steps back out to the real folder it
+lives in. An archive is read-only: F5 extracts the selection (or just the
+cursor row) to the opposite pane's directory instead of copying, and
+F4 Edit, Move/Rename, MkDir, and Delete all refuse with a dialog.
+F3 View extracts a single file to a temp copy first, then opens it in the
+normal viewer; F3 on a .zip you haven't browsed into yet offers a lightweight
+picker to preview one member without fully browsing in.
+
+COPY/PASTE & DRAG-IN:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ctrl+C / ⌘C copies the selection (or cursor row) to the OS clipboard as
+real files — Paste into Finder/Explorer/Nautilus copies them there for
+real, exactly as if you'd copied the files themselves. Ctrl+V / ⌘V does
+the reverse: copies whatever files are currently on the OS clipboard (e.g.
+from Ctrl+C on files in Finder/Explorer) into the active pane's directory.
+Also available as Copy on the right-click menu, and Copy/Paste on the File
+menu and F9 popup. You can also just drag files from Finder/Explorer/
+Nautilus and drop them onto a pane to copy them in.
 
 FAVORITES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -197,6 +229,7 @@ KEYBOARD SHORTCUTS:
 • F1-F10 - see FUNCTION KEYS above.
 • Ctrl+U - Swap Panes.
 • Ctrl+A / ⌘A - Select All. Ctrl+Shift+A / ⌘⇧A - Deselect All.
+• Ctrl+C / ⌘C - Copy (real files, to the OS clipboard). Ctrl+V / ⌘V - Paste.
 • Shift-click / Ctrl-click (⌘-click on macOS) - see SELECTING FILES above.
 • Enter - Open/navigate into the cursor row.
 • Cmd/Ctrl+Q - Quit

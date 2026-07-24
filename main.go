@@ -16,7 +16,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "0.3.0" // see FyneApp.toml
+	appVersion = "0.4.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -54,6 +54,10 @@ func main() {
 
 	win.SetMainMenu(buildMenu(a, win))
 	setupSystemTray(a, win)
+
+	// Drag files in from Finder/Explorer/Nautilus to copy them into
+	// whichever pane they're dropped on (see dragdrop_ui.go).
+	win.SetOnDropped(cmdr.handleDropped)
 
 	// Closing the window quits the app. Deferred via fyne.Do so quit() runs on a
 	// clean loop iteration outside whatever callback triggered it — quitting
@@ -117,6 +121,9 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
 		fyne.NewMenuItem("Search… (active pane)", func() { cmdr.showSearch(cmdr.activePane()) }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { cmdr.doCopyToClipboard() }),
+		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { cmdr.doPaste() }),
 		fyne.NewMenuItemSeparator(),
 		editorsItem,
 		fyne.NewMenuItem("7-Zip Binary Path…", func() { cmdr.showSevenZipSettings() }),

@@ -20,6 +20,8 @@ import (
 	"commander/internal/fsops"
 	"commander/internal/launch"
 	"commander/internal/panelstate"
+	"commander/internal/vfs"
+	"commander/internal/vfs/zipfs"
 )
 
 // showRowContextMenu builds and shows the popup for name (already resolved
@@ -27,6 +29,11 @@ import (
 func (c *commander) showRowContextMenu(p *pane, view *fileListView, name string, pos fyne.Position) {
 	entry, fullPath, ok := view.entryAndPath(name)
 	if !ok {
+		return
+	}
+
+	if zfs, insideArchive := view.fs.(*zipfs.FS); insideArchive {
+		c.showArchivedRowContextMenu(zfs, view, entry, fullPath, p, pos)
 		return
 	}
 
@@ -44,6 +51,8 @@ func (c *commander) showRowContextMenu(p *pane, view *fileListView, name string,
 		fyne.NewMenuItem("Duplicate", func() { c.duplicateEntry(view, fullPath) }),
 		fyne.NewMenuItem("Move to Trash", func() { c.trashEntry(view, fullPath) }),
 		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Copy", func() { c.copyToClipboard(view) }),
+		fyne.NewMenuItem("Paste", func() { c.pasteInto(p, view) }),
 		fyne.NewMenuItem("Copy Name", func() { c.win.Clipboard().SetContent(entry.Name) }),
 		fyne.NewMenuItem("Copy Path", func() { c.win.Clipboard().SetContent(fullPath) }),
 		fyne.NewMenuItemSeparator(),
@@ -83,6 +92,41 @@ func (c *commander) showRowContextMenu(p *pane, view *fileListView, name string,
 	}
 
 	widget.NewPopUpMenu(fyne.NewMenu("", items...), c.win.Canvas()).ShowAtPosition(pos)
+}
+
+// showArchivedRowContextMenu is the stripped-down context menu for a row
+// inside an open archive — most real-filesystem actions above (Open With,
+// Duplicate, Trash, Compress, Create Symbolic Link, Reveal in File
+// Manager/Opposite Pane, Add to Favorites) don't apply to something that
+// only exists inside a read-only .zip.
+func (c *commander) showArchivedRowContextMenu(zfs *zipfs.FS, view *fileListView, entry vfs.Entry, fullPath string, p *pane, pos fyne.Position) {
+	items := []*fyne.MenuItem{
+		fyne.NewMenuItem("Open", func() { view.activate(entry) }),
+	}
+	if !entry.IsDir {
+		items = append(items, fyne.NewMenuItem("View", func() { c.viewArchivedMember(zfs, entry.Name, fullPath) }))
+	}
+	items = append(items,
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Extract to Opposite Pane", func() { c.extractToOppositePane(view, zfs, p) }),
+	)
+	widget.NewPopUpMenu(fyne.NewMenu("", items...), c.win.Canvas()).ShowAtPosition(pos)
+}
+
+// extractToOppositePane is the archive context menu's F5-Extract
+// equivalent: the current selection (or just the cursor row, same
+// SelectionOrCursor rule as everywhere else) into the opposite pane's
+// current directory.
+func (c *commander) extractToOppositePane(view *fileListView, zfs *zipfs.FS, p *pane) {
+	paths := view.SelectionOrCursor()
+	if len(paths) == 0 {
+		return
+	}
+	dst := c.inactivePaneOf(p).activeState()
+	if dst == nil {
+		return
+	}
+	c.runFileOp("Extracting", paths, dst.Path, zfs.Extract, p)
 }
 
 // openWithMenuItems lists the user's configured external editors (F9 →
@@ -154,17 +198,16 @@ func (c *commander) compressSelection(view *fileListView, ext, sevenZipBin strin
 }
 
 // createSymlink prompts for where to create a link to sourcePath, defaulting
-// to the opposite pane's current directory with the same base name —
-// mirroring F5/F6's "operations target the other pane" convention.
+// to "link-<name>" alongside the source in the tab's own current directory
+// (not the opposite pane — a symlink is meant to sit next to what it points
+// at, unlike Copy/Move). The default name is pre-selected so retyping it is
+// a single keystroke, same convention as F7 MkDir's prefill.
 func (c *commander) createSymlink(view *fileListView, sourcePath string, other *pane) {
-	defaultPath := sourcePath
-	if dst := other.activeState(); dst != nil {
-		defaultPath = filepath.Join(dst.Path, filepath.Base(sourcePath))
-	}
+	defaultPath := fsops.SymlinkName(view.CurrentPath(), filepath.Base(sourcePath))
 	nameEntry := widget.NewEntry()
 	nameEntry.SetText(defaultPath)
 	content := container.NewVBox(widget.NewLabel("Create symbolic link at:"), nameEntry)
-	dialog.NewCustomConfirm("Create Symbolic Link", "Create", "Cancel", content, func(ok bool) {
+	d := dialog.NewCustomConfirm("Create Symbolic Link", "Create", "Cancel", content, func(ok bool) {
 		if !ok || strings.TrimSpace(nameEntry.Text) == "" {
 			return
 		}
@@ -176,7 +219,10 @@ func (c *commander) createSymlink(view *fileListView, sourcePath string, other *
 		if v := other.activeView(); v != nil {
 			v.Reload()
 		}
-	}, c.win).Show()
+	}, c.win)
+	d.Resize(fyne.NewSize(560, 160))
+	d.Show()
+	nameEntry.TypedShortcut(&fyne.ShortcutSelectAll{})
 }
 
 func (c *commander) trashEntry(view *fileListView, path string) {

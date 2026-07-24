@@ -17,22 +17,24 @@ import (
 	"commander/internal/layout"
 	"commander/internal/panelstate"
 	"commander/internal/vfs"
+	"commander/internal/vfs/zipfs"
 )
 
 // pane owns one side's tabs; each tab pairs a panelstate.State with the
 // fileListView that renders it.
 type pane struct {
-	fs            vfs.FileSystem
-	win           fyne.Window
-	colors        func() ColorScheme
-	showHidden    func() bool // dotfile visibility — shared app-wide setting, see commander.toggleHiddenFiles
-	isActivePane  func() bool
-	onActivated   func() // this pane was clicked into; tell commander to make it active
-	onStatus      func(msg string)
-	onOtherKey    func(*fyne.KeyEvent)                                              // forwarded to each tab's fileListView — see keyTable
-	onFavorites   func()                                                            // Favorites button clicked; commander owns the shared list (favorites_ui.go)
-	onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position) // right-click on a row; commander owns the menu (contextmenu_ui.go)
-	onSearch      func()                                                            // Search button clicked; commander owns the search dialog (search_ui.go)
+	fs                   vfs.FileSystem
+	win                  fyne.Window
+	colors               func() ColorScheme
+	showHidden           func() bool // dotfile visibility — shared app-wide setting, see commander.toggleHiddenFiles
+	isActivePane         func() bool
+	onActivated          func() // this pane was clicked into; tell commander to make it active
+	onStatus             func(msg string)
+	onOtherKey           func(*fyne.KeyEvent)                                              // forwarded to each tab's fileListView — see keyTable
+	onFavorites          func()                                                            // Favorites button clicked; commander owns the shared list (favorites_ui.go)
+	onContextMenu        func(p *pane, view *fileListView, name string, pos fyne.Position) // right-click on a row; commander owns the menu (contextmenu_ui.go)
+	onSearch             func()                                                            // Search button clicked; commander owns the search dialog (search_ui.go)
+	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)                   // Enter/double-click on a file inside an open archive; commander extracts + opens it (archive_browse_ui.go)
 
 	tabs   *container.DocTabs
 	views  []*fileListView
@@ -48,8 +50,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func()) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onOpenArchivedMember: onOpenArchivedMember}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -112,6 +114,7 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 		if idx < 0 {
 			return
 		}
+		p.views[idx].closeFS() // release an open archive handle, if this tab was browsing one
 		p.views = append(p.views[:idx], p.views[idx+1:]...)
 		p.states = append(p.states[:idx], p.states[idx+1:]...)
 		p.tabs.RemoveIndex(idx)
@@ -180,6 +183,7 @@ func (p *pane) bindView(view *fileListView) {
 			p.onContextMenu(p, view, name, pos)
 		}
 	}
+	view.onOpenArchivedMember = p.onOpenArchivedMember
 }
 
 // rebindViews re-binds every view p currently holds — called after

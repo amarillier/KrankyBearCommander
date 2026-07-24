@@ -2,15 +2,60 @@ Release notes
 KrankyBear Commander: a free, cross-platform dual-pane file manager for Windows, Linux and macOS.
 
 Future ideas:
-- very useful feature - click file/directory name, second click to select name for easy inline rename capability - second click soon after selects name, not full name including extension to allow easy name renaming - only name selected
-- copy the actual file (not just its name/path) to the clipboard so it can be pasted as a real file into Finder/Explorer - needs native per-OS pasteboard code, similar effort to drag-and-drop below (Copy Name / Copy Path as text shipped in 0.3.0)
-- drag from commander to other apps, drag from other apps and drop into commander to copy - maybe other keys e.g. shift drag / drop to move
+- (nothing open right now — see Later phase for bigger/deferred items)
 
 Later phase:
+- drag from commander OUT to other apps (Finder/Explorer/Nautilus) - Fyne has no API for initiating an OS-level drag session, so this needs real native code per platform (NSDraggingSession/OLE drag-source/XDND), unlike the clipboard copy/paste and drag-IN support shipped in 0.4.0 (both use existing public APIs). Nimble didn't support this either, and it's nice-to-have rather than a blocker, so lower priority
 - user ability to resize columns from fixed sizes, then also to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names
 - tags ability - colors - select one or more files, add colored icon. Debatable usefulness - nice quick visual maybe - or add icon capabilities instead for user manual / visual grouping
 - TotalCmd has a really nice file rename option for renaming with patterns, any case to title case, proper case etc. and regex replace patterns - activated by selecting file(s) and Ctrl M. This is really powerful and could use some images from Total Cmd running on a Win system to replicate
 - Connections manager to allow using keychain for credentials if needed, keys etc to connect via rsync (where available), sftp, scp, ../KrankyBearFileMover protocol so a remote share can open in a tab as if just another local directory or file system. Could end up more comprehensive with e.g. box, dropbox, Google Drive - maybe, but we don't necessarily want to do everything
+
+Version 0.4.0 - July 24, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Double-click a .zip to browse straight into it, exactly like a real
+   directory — tabs, sorting, Full/Brief view, checkboxes/shift-click/
+   Select All, and the status line all just work. ".." at the archive's own
+   root steps back out to the real folder it lives in.
+✨ NEW F5 inside an open archive extracts the selection (or just the
+   cursor row) to the opposite pane's directory instead of copying, with
+   the same progress dialog and Overwrite/Skip/Rename/Cancel handling as a
+   real Copy. A stripped-down right-click menu offers the same as
+   Extract to Opposite Pane, plus Open and View.
+✨ NEW F3 View on a file already inside an open archive extracts it to a
+   temp copy first, then opens the normal viewer — and F3 on a .zip file
+   you haven't browsed into yet offers a lightweight picker to preview a
+   single member without fully browsing in.
+✨ NEW F4 Edit, Move/Rename, MkDir, and Delete refuse with a clear
+   "Read-Only Archive" dialog when browsing inside a .zip, instead of
+   failing confusingly (or, for F4, silently opening an empty file)
+   against paths that don't really exist on disk.
+✨ NEW Inline rename: click an already-selected/cursor row's name again
+   (slower than a double-click) to edit it in place, in either view mode.
+   Enter commits, Escape or clicking away cancels; the extension is hidden
+   during editing and silently reattached unless you type your own.
+✨ NEW Check for Updates is now in the F9 popup too, alongside Help/About.
+✨ NEW Create Symbolic Link…'s dialog is bigger and easier to use, defaults
+   to "link-<name>" alongside the source in the tab's own directory (not
+   the opposite pane), and pre-selects the name so retyping it is a single
+   keystroke.
+🐛 FIX Clicking the F9 Menu button (as opposed to pressing the F9 key)
+   left the popup unable to close via Escape or a second F9 press — it
+   needed an extra click just to dismiss. The button was clearing keyboard
+   focus right after showing the popup, undoing the focus Fyne had just
+   given it.
+✨ NEW Ctrl+C / ⌘C copies the selection (or cursor row) to the OS clipboard
+   as real files — Paste into Finder/Explorer/Nautilus copies them there
+   for real, same as copying the files themselves would. Ctrl+V / ⌘V does
+   the reverse: copies whatever files are on the OS clipboard (e.g. from
+   Ctrl+C on files in Finder/Explorer) into the active pane's directory.
+   Also on the right-click menu (Copy / Paste — Paste always targets the
+   right-clicked row's own directory) and File menu/F9 popup (Copy/Paste).
+   Implemented as native platform code (Cocoa on macOS, Win32 on Windows,
+   xclip/wl-copy on Linux) rather than osascript/PowerShell, which are
+   automation engines security tooling commonly watches for.
+✨ NEW Drag files from Finder/Explorer/Nautilus and drop them onto a pane
+   to copy them in, at that pane's active tab's current directory.
 
 Version 0.3.0 - July 23, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

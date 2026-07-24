@@ -21,6 +21,8 @@ import (
 	"commander/internal/launch"
 	"commander/internal/panelstate"
 	"commander/internal/vfs"
+	"commander/internal/vfs/localfs"
+	"commander/internal/vfs/zipfs"
 )
 
 // parentEntryName is the synthetic ".." row offered whenever the tab isn't
@@ -48,6 +50,12 @@ type fileListView struct {
 	onOtherKey    func(*fyne.KeyEvent)                 // a key the table itself doesn't handle, while it has focus — see keyTable
 	onContextMenu func(name string, pos fyne.Position) // right-click on a row; commander owns the popup (contextmenu_ui.go)
 
+	// onOpenArchivedMember is Enter/double-click on a file that's already
+	// inside an open archive (v.fs is a *zipfs.FS) — there's no real file at
+	// its presented path, so commander (archive_browse_ui.go) extracts it to
+	// a temp copy first, then opens that with the OS's default application.
+	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)
+
 	root       *fyne.Container // Build()'s return value; holds whichever view is active
 	table      *keyTable
 	header     [4]*widget.Button // Name / Ext / Size / Modified sort buttons
@@ -73,6 +81,15 @@ type fileListView struct {
 	// extending/shrinking the same range instead of re-basing from wherever
 	// the previous Shift-click landed (classic Explorer/Finder behavior).
 	selectAnchor string
+
+	// renaming/activeRenameField track an in-progress inline rename (see
+	// rename_ui.go) — renaming is nil except between beginInlineRename and
+	// its eventual commit/cancel; activeRenameField is set by whichever of
+	// updateCell/buildBriefCell rendered the matching row, so
+	// beginInlineRename can focus and select it right after triggering a
+	// Refresh (both view modes' cell objects are only reachable from there).
+	renaming          *renamingState
+	activeRenameField *renameEntry
 }
 
 func newFileListView(fs vfs.FileSystem, state *panelstate.State, colors func() ColorScheme, showHidden func() bool, isActive func() bool) *fileListView {
@@ -97,6 +114,14 @@ func (v *fileListView) Build() fyne.CanvasObject {
 // view mode is active.
 func (v *fileListView) Reload() {
 	prevRowCount := v.rowCount()
+
+	// An in-progress inline rename refers to a row in the listing about to
+	// be replaced wholesale — nothing currently commits/cancels it first
+	// (Reload can run for unrelated reasons, e.g. F2, another tab's
+	// operation finishing), so just drop it rather than risk it dangling
+	// against a row that may no longer exist.
+	v.renaming = nil
+	v.activeRenameField = nil
 
 	v.computedSizes = nil
 	v.computedParentSize = nil
@@ -374,9 +399,21 @@ func (v *fileListView) buildTable() *keyTable {
 	t := newKeyTable(
 		func() (int, int) { return v.rowCount(), tableColumnCount },
 		func() fyne.CanvasObject {
+			nameStack := container.NewStack(
+				canvas.NewText("", color.White),
+				newRenameEntry(func(text string) { v.commitRename(text) }, v.cancelRename),
+			)
 			return container.NewStack(
 				canvas.NewRectangle(color.Transparent),
-				container.NewHBox(widget.NewCheck("", nil), canvas.NewText("", color.White)),
+				// Border, not HBox: HBox only ever gives nameStack its own
+				// natural minimum width, which for the plain canvas.Text
+				// label happened to look fine (Fyne doesn't clip text to its
+				// layout box, so it visually overflowed into the rest of the
+				// column anyway) but renders the renameEntry as a tiny box
+				// once it's shown, since a real widget IS clipped to
+				// whatever size it's given. Border's center slot stretches
+				// to fill all remaining width after the checkbox.
+				container.NewBorder(nil, nil, widget.NewCheck("", nil), nil, nameStack),
 			)
 		},
 		v.updateCell,
@@ -399,9 +436,13 @@ func (v *fileListView) buildTable() *keyTable {
 func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 	stack := o.(*fyne.Container)
 	bg := stack.Objects[0].(*canvas.Rectangle)
-	hbox := stack.Objects[1].(*fyne.Container)
-	check := hbox.Objects[0].(*widget.Check)
-	txt := hbox.Objects[1].(*canvas.Text)
+	border := stack.Objects[1].(*fyne.Container)
+	// container.NewBorder orders Objects as [center..., left] when only a
+	// left edge is set (see its doc comment) — nameStack first, check second.
+	nameStack := border.Objects[0].(*fyne.Container)
+	check := border.Objects[1].(*widget.Check)
+	txt := nameStack.Objects[0].(*canvas.Text)
+	renameField := nameStack.Objects[1].(*renameEntry)
 
 	cs := v.colors()
 	bg.FillColor = cs.PanelBG
@@ -410,16 +451,54 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 	entry, ok := v.entryAt(id.Row)
 	if !ok {
 		txt.Text = ""
+		txt.Show()
+		renameField.Hide()
 		check.Hidden = true
 		txt.Refresh()
 		return
 	}
 
+	// widget.Table recycles a fixed pool of cell objects across whichever
+	// rows are currently scrolled into view — scrolling the renaming row
+	// out of sight reassigns its renameField to a different row entirely,
+	// with no FocusLost/Escape ever firing (scrolling isn't a focus change),
+	// which would otherwise leave the rename stuck "open" against a row
+	// that's no longer even on screen. Detecting the exact reassignment
+	// here — this object was the active rename field, but is no longer
+	// showing the row being renamed — is the one place that can catch it.
+	if v.renaming != nil && v.activeRenameField == renameField && v.renaming.name != entry.Name {
+		v.renaming = nil
+		v.activeRenameField = nil
+		if canvas := fyne.CurrentApp().Driver().CanvasForObject(v.table); canvas != nil {
+			canvas.Unfocus()
+		}
+	}
+
+	renaming := id.Col == colName && v.renaming != nil && v.renaming.name == entry.Name
+	if renaming {
+		v.activeRenameField = renameField
+	}
+	// renameField lives in the same nameStack template shared by every
+	// column (only the checkbox is column-gated below), so every column
+	// besides a Name cell mid-rename must explicitly keep it hidden — left
+	// to its default visibility it would sit on top of, and blank out, the
+	// Ext/Size/Modified/Perm text underneath.
+	if renaming {
+		txt.Hide()
+		renameField.Show()
+	} else {
+		renameField.Hide()
+		txt.Show()
+	}
+
 	txt.Color = v.rowColor(cs, entry)
-	check.Hidden = id.Col != colName || entry.Name == parentEntryName
+	check.Hidden = id.Col != colName || entry.Name == parentEntryName || renaming
 
 	switch id.Col {
 	case colName:
+		if renaming {
+			break
+		}
 		check.Checked = v.state.Selected[entry.Name]
 		name := entry.Name
 		check.OnChanged = func(bool) {
@@ -500,6 +579,10 @@ func (v *fileListView) handleTableTap(id widget.TableCellID) {
 		v.onFocusGained()
 	}
 
+	if v.renaming != nil && v.renaming.name != entry.Name {
+		v.forceCancelRename()
+	}
+
 	mod := v.table.pendingModifier
 	v.table.pendingModifier = 0 // one-shot: don't let it leak into a later keyboard-driven OnSelected
 
@@ -508,6 +591,10 @@ func (v *fileListView) handleTableTap(id widget.TableCellID) {
 	// activation on a modified click.
 	now := time.Now()
 	isDouble := mod == 0 && id.Row == v.lastTapRow && now.Sub(v.lastTapTime) < doubleTapWindow
+	// A second, slower click on the Name cell of a row that was ALREADY the
+	// cursor (not just selected by this click) starts an inline rename —
+	// classic Explorer/Finder "click, pause, click again" convention.
+	wasCursor := mod == 0 && !isDouble && id.Col == colName && entry.Name != parentEntryName && v.state.Cursor == entry.Name
 	v.lastTapRow, v.lastTapTime = id.Row, now
 
 	v.applyClickSelection(entry.Name, mod)
@@ -524,6 +611,10 @@ func (v *fileListView) handleTableTap(id widget.TableCellID) {
 
 	if isDouble {
 		v.activate(entry)
+		return
+	}
+	if wasCursor {
+		v.beginInlineRename(entry)
 	}
 }
 
@@ -614,6 +705,10 @@ func (v *fileListView) buildBriefGrid() fyne.CanvasObject {
 
 func (v *fileListView) buildBriefCell(entry vfs.Entry, cs ColorScheme) fyne.CanvasObject {
 	name := entry.Name
+	if v.renaming != nil && v.renaming.name == name {
+		return v.buildBriefRenameCell(cs)
+	}
+
 	txt := canvas.NewText(name, v.rowColor(cs, entry))
 	bg := canvas.NewRectangle(cs.PanelBG)
 	content := container.NewStack(bg, container.NewPadded(txt))
@@ -622,9 +717,21 @@ func (v *fileListView) buildBriefCell(entry vfs.Entry, cs ColorScheme) fyne.Canv
 		if v.onFocusGained != nil {
 			v.onFocusGained()
 		}
+		if v.renaming != nil && v.renaming.name != name {
+			v.forceCancelRename()
+		}
+		// A second, slower tap (Fyne only calls Tapped, not DoubleTapped, for
+		// a genuine single/slow tap — see tappableCell's doc comment) on a
+		// cell that was ALREADY the cursor starts an inline rename, same
+		// convention as the Table view's handleTableTap.
+		wasCursor := mod == 0 && entry.Name != parentEntryName && v.state.Cursor == name
 		v.applyClickSelection(name, mod)
 		v.reportSelection()
-		v.renderActiveView()
+		if wasCursor {
+			v.beginInlineRename(entry)
+		} else {
+			v.renderActiveView()
+		}
 	}, func() {
 		if v.onFocusGained != nil {
 			v.onFocusGained()
@@ -635,6 +742,18 @@ func (v *fileListView) buildBriefCell(entry vfs.Entry, cs ColorScheme) fyne.Canv
 	}, func(e *fyne.PointEvent) {
 		v.offerContextMenu(name, e.AbsolutePosition)
 	})
+}
+
+// buildBriefRenameCell is buildBriefCell's rename-mode counterpart —
+// unlike the Table view (whose cells are recycled and so need a
+// permanently-present-but-hidden Entry), Brief view rebuilds its whole grid
+// from scratch on every render (see renderActiveView), so it can simply
+// swap in a real Entry for the cell being renamed.
+func (v *fileListView) buildBriefRenameCell(cs ColorScheme) fyne.CanvasObject {
+	bg := canvas.NewRectangle(cs.PanelBG)
+	entryWidget := newRenameEntry(func(text string) { v.commitRename(text) }, v.cancelRename)
+	v.activeRenameField = entryWidget
+	return container.NewStack(bg, container.NewPadded(entryWidget))
 }
 
 // ── navigation / activation ──────────────────────────────────────────────────
@@ -683,6 +802,13 @@ func entryByName(entries []vfs.Entry, name string) (vfs.Entry, bool) {
 	return vfs.Entry{}, false
 }
 
+// activate opens/navigates into entry — a directory (or "..") navigates,
+// a plain file opens with the OS's default application. Two archive-aware
+// exceptions: a .zip file (while browsing the real filesystem) is browsed
+// into rather than opened externally, matching Nimble/Total Commander; a
+// file already inside an open archive is extracted to a temp copy first
+// (see commander.openArchivedMember in archive_browse_ui.go), since there
+// is no real file at its presented path to hand the OS.
 func (v *fileListView) activate(entry vfs.Entry) {
 	if entry.Name == parentEntryName {
 		v.navigateTo(v.fs.Dir(v.state.Path))
@@ -692,13 +818,71 @@ func (v *fileListView) activate(entry vfs.Entry) {
 		v.navigateTo(v.fs.Join(v.state.Path, entry.Name))
 		return
 	}
-	openWithOS(v.fs.Join(v.state.Path, entry.Name))
+	fullPath := v.fs.Join(v.state.Path, entry.Name)
+	if zfs, ok := v.fs.(*zipfs.FS); ok {
+		if v.onOpenArchivedMember != nil {
+			v.onOpenArchivedMember(zfs, entry.Name, fullPath)
+		}
+		return
+	}
+	if zipfs.HasZipExt(entry.Name) {
+		v.enterZip(fullPath)
+		return
+	}
+	openWithOS(fullPath)
+}
+
+// enterZip swaps this view onto a read-only vfs.FileSystem browsing the
+// archive at zipPath, rooted at the archive's own path (see zipfs's doc
+// comment for the "presented path" convention that keeps tabLabel/status
+// line/Copy Path working unmodified).
+func (v *fileListView) enterZip(zipPath string) {
+	zfs, err := zipfs.Open(zipPath)
+	if err != nil {
+		if v.onStatus != nil {
+			v.onStatus("cannot open archive: " + err.Error())
+		}
+		return
+	}
+	if !v.state.Navigate(zipPath) {
+		zfs.Close()
+		if v.onStatus != nil {
+			v.onStatus("tab is locked")
+		}
+		return
+	}
+	v.fs = zfs
+	v.reloadAfterNavigate()
+}
+
+// adjustFSForTarget swaps this view back onto the real filesystem the
+// moment a navigation target (typically ".." from an open archive's own
+// root, but equally a Home/Favorites jump) is no longer inside the
+// currently-open archive — see zipfs.FS.Dir's doc comment for why this is
+// the one place that needs to know about the swap at all.
+func (v *fileListView) adjustFSForTarget(target string) {
+	zfs, ok := v.fs.(*zipfs.FS)
+	if !ok || zfs.IsInside(target) {
+		return
+	}
+	zfs.Close()
+	v.fs = localfs.New()
+}
+
+// closeFS releases this view's open archive handle, if it's currently
+// browsing one — called when its tab closes (see paneview.go's
+// CloseIntercept), since nothing else would ever navigate it back out.
+func (v *fileListView) closeFS() {
+	if zfs, ok := v.fs.(*zipfs.FS); ok {
+		zfs.Close()
+	}
 }
 
 // navigateTo is casual in-pane browsing (double-click/Enter into a
 // subdirectory or ".."), which a locked tab may refuse — see JumpTo for
 // explicit-destination navigation that a lock never blocks.
 func (v *fileListView) navigateTo(target string) {
+	v.adjustFSForTarget(target)
 	if !v.state.Navigate(target) {
 		if v.onStatus != nil {
 			v.onStatus("tab is locked")
@@ -713,6 +897,7 @@ func (v *fileListView) navigateTo(target string) {
 // tab's lock — Home afterward still returns to the same locked root as
 // before the jump. See panelstate.State.Jump.
 func (v *fileListView) JumpTo(target string) {
+	v.adjustFSForTarget(target)
 	v.state.Jump(target)
 	v.reloadAfterNavigate()
 }
@@ -823,10 +1008,11 @@ func (v *fileListView) cursorInfo() string {
 	return fmt.Sprintf("%s  %s  %s", entry.Name, humanSize(entry.Size), entry.ModTime.Format("2006-01-02 15:04"))
 }
 
-// SelectionOrCursor returns full paths for the explicit multi-selection, or
-// (if nothing is explicitly selected) just the cursor row — the rule F-key
-// operations use to decide what they act on.
-func (v *fileListView) SelectionOrCursor() []string {
+// SelectionOrCursorNames is SelectionOrCursor's counterpart in terms of bare
+// names rather than joined paths — F3 View needs the actual vfs.Entry (is
+// it a directory? an archive? a file already inside one?) to decide how to
+// view it, not just a path string.
+func (v *fileListView) SelectionOrCursorNames() []string {
 	var names []string
 	for _, e := range v.entries {
 		if v.state.Selected[e.Name] {
@@ -836,6 +1022,14 @@ func (v *fileListView) SelectionOrCursor() []string {
 	if len(names) == 0 && v.state.Cursor != "" && v.state.Cursor != parentEntryName {
 		names = append(names, v.state.Cursor)
 	}
+	return names
+}
+
+// SelectionOrCursor returns full paths for the explicit multi-selection, or
+// (if nothing is explicitly selected) just the cursor row — the rule F-key
+// operations use to decide what they act on.
+func (v *fileListView) SelectionOrCursor() []string {
+	names := v.SelectionOrCursorNames()
 	paths := make([]string, len(names))
 	for i, n := range names {
 		paths[i] = v.fs.Join(v.state.Path, n)

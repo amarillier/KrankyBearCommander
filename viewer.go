@@ -13,28 +13,46 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+
+	"commander/internal/vfs/zipfs"
 )
 
 // viewerMaxBytes caps how much of a file this simple in-memory viewer reads.
 const viewerMaxBytes = 4 << 20 // 4 MB
 
+// doView is F3: view the cursor row read-only. Three cases beyond a plain
+// real file: a directory can't be viewed; a file already inside an open
+// archive is extracted to a temp copy first (see viewArchivedMember); a
+// .zip file, while still browsing the real filesystem, offers a
+// lightweight picker to preview one of its members without fully browsing
+// into it (see showZipPreviewPicker).
 func (c *commander) doView() {
-	paths := c.activePane().activeView().SelectionOrCursor()
-	if len(paths) == 0 {
+	view := c.activePane().activeView()
+	if view == nil {
+		return
+	}
+	names := view.SelectionOrCursorNames()
+	if len(names) == 0 {
 		c.showStatus("select a file to view")
 		return
 	}
-	path := paths[0]
-	info, err := os.Stat(path)
-	if err != nil {
-		c.showStatus("cannot view " + path + ": " + err.Error())
+	entry, fullPath, ok := view.entryAndPath(names[0])
+	if !ok {
 		return
 	}
-	if info.IsDir() {
+	if entry.IsDir {
 		c.showStatus("F3: select a file, not a directory")
 		return
 	}
-	showViewer(c.app, path)
+	if zfs, insideArchive := view.fs.(*zipfs.FS); insideArchive {
+		c.viewArchivedMember(zfs, entry.Name, fullPath)
+		return
+	}
+	if zipfs.HasZipExt(entry.Name) {
+		c.showZipPreviewPicker(fullPath)
+		return
+	}
+	showViewer(c.app, fullPath)
 }
 
 func showViewer(a fyne.App, path string) {
