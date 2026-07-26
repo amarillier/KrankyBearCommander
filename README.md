@@ -28,13 +28,25 @@ fixing and performance work.
 - **Right-click context menu**: Open, Open With (your configured external
   editors), Duplicate, Move to Trash, Copy/Paste (real files, to/from the OS
   clipboard) or Copy Name/Path (as text), Compress (to .zip, or .7z if a
-  7z-capable binary is available), Create Symbolic Link…, Reveal in File
-  Manager, Reveal in Opposite Pane, and Add to Favorites for directories.
+  7z-capable binary is available), Multi-Rename Tool…, Create Symbolic
+  Link…, Reveal in File Manager, Reveal in Opposite Pane, and Add to
+  Favorites for directories.
+- **Multi-Rename Tool** (Ctrl+M) — TotalCmd-style batch rename with pattern
+  placeholders (`[N]` name, `[N1-3]` name characters, `[E]` extension,
+  `[C]` counter with start/step/zero-padding), whole-name case conversion,
+  and find/replace (plain text or regex), with a live old→new preview
+  before anything changes on disk.
 - **Native OS clipboard and drag-in**: Ctrl/Cmd+C copies the selection as
   real files — Paste into Finder/Explorer/Nautilus copies them there for
   real; Ctrl/Cmd+V does the reverse. Implemented as native platform code
   (Cocoa/Win32/xclip) rather than osascript or PowerShell. You can also drag
   files from your OS file manager and drop them onto a pane to copy them in.
+- **Drag-out (macOS and Windows)**: click-drag the current selection (or
+  cursor row) out of a pane onto Finder/Explorer, the opposite pane, or any
+  other app that accepts dropped files (e.g. Slack, Mail) — a native Cocoa
+  drag session on macOS, real OLE COM objects via `DoDragDrop` on Windows;
+  neither uses osascript or PowerShell. Linux support is planned but not
+  yet available.
 - **Browse into .zip archives** — double-click a .zip to browse it like a
   real directory (tabs, sorting, selection all work); F5 extracts instead of
   copying, F3 previews a file (or lets you pick one to preview without fully

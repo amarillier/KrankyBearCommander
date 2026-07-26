@@ -91,9 +91,9 @@ F8  Delete                Sends the selection to the trash.
 ⇧F8 Delete Permanently    Bypasses the trash — cannot be undone. Mouse/menu
                           only (see KNOWN LIMITATIONS).
 F9  Menu                  New tab, view mode, Refresh, Swap Panes, Calculate
-                          Folder Sizes, Search, Show Hidden Files, Panel
-                          Colors, Editors, 7-Zip Binary Path, Help, Check
-                          for Updates, About.
+                          Folder Sizes, Search, Copy/Paste, Multi-Rename
+                          Tool, Show Hidden Files, Panel Colors, Editors,
+                          7-Zip Binary Path, Help, Check for Updates, About.
 F10 Quit                  Quits ` + appName + `.
 Enter                     Opens/navigates into the cursor row, same as a
                           double-click.
@@ -139,6 +139,23 @@ directory regardless of which row you right-clicked; everything else here
 acts on whichever row you right-clicked.
 Inside an open archive this menu is much shorter — see BROWSING ARCHIVES.
 
+MULTI-RENAME TOOL:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ctrl+M (or the right-click menu / File menu / F9 popup) opens a
+TotalCmd-style batch rename for the selection (or just the cursor row),
+with a live old→new preview before anything actually changes on disk:
+• Pattern placeholders: [N] original name, [N1-3] characters 1-3 of the
+  name, [E] extension, [C] a counter ([C:start], [C:start,step],
+  [C:start,step,width] for zero-padding). An empty pattern defaults to
+  [N]. If your pattern doesn't include [E], the original extension is
+  kept automatically.
+• Case: No Change / UPPERCASE / lowercase / Title Case / Sentence case,
+  applied to the whole computed name.
+• Find/Replace: plain text or a regular expression.
+Renaming two files to each other's names (or any other same-batch
+collision) is handled safely; a new name that would collide with some
+other, unrelated existing file is refused before anything is touched.
+
 COMPRESSING:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 .zip needs nothing extra. .7z only appears as an option when a 7z-capable
@@ -157,7 +174,7 @@ F3 View extracts a single file to a temp copy first, then opens it in the
 normal viewer; F3 on a .zip you haven't browsed into yet offers a lightweight
 picker to preview one member without fully browsing in.
 
-COPY/PASTE & DRAG-IN:
+COPY/PASTE & DRAG-IN/OUT:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Ctrl+C / ⌘C copies the selection (or cursor row) to the OS clipboard as
 real files — Paste into Finder/Explorer/Nautilus copies them there for
@@ -167,6 +184,13 @@ from Ctrl+C on files in Finder/Explorer) into the active pane's directory.
 Also available as Copy on the right-click menu, and Copy/Paste on the File
 menu and F9 popup. You can also just drag files from Finder/Explorer/
 Nautilus and drop them onto a pane to copy them in.
+
+On macOS and Windows, you can also drag files OUT of a pane — onto
+Finder/Explorer, the opposite pane, or any other app that accepts dropped
+files (e.g. Slack, Mail) — the same way you'd drag them from Finder or
+Explorer itself. Click-dragging carries whichever files are currently
+selected (or the cursor row) in the pane the drag started in. Not yet
+available on Linux.
 
 FAVORITES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -230,6 +254,8 @@ KEYBOARD SHORTCUTS:
 • Ctrl+U - Swap Panes.
 • Ctrl+A / ⌘A - Select All. Ctrl+Shift+A / ⌘⇧A - Deselect All.
 • Ctrl+C / ⌘C - Copy (real files, to the OS clipboard). Ctrl+V / ⌘V - Paste.
+• Ctrl+M - Multi-Rename Tool. Literal Ctrl even on macOS (not ⌘), since
+  ⌘M is already macOS's own Minimize Window shortcut below.
 • Shift-click / Ctrl-click (⌘-click on macOS) - see SELECTING FILES above.
 • Enter - Open/navigate into the cursor row.
 • Cmd/Ctrl+Q - Quit

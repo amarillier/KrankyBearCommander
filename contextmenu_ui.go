@@ -62,6 +62,7 @@ func (c *commander) showRowContextMenu(p *pane, view *fileListView, name string,
 	compressItem.ChildMenu = fyne.NewMenu("", c.compressMenuItems(view)...)
 	items = append(items,
 		compressItem,
+		fyne.NewMenuItem("Multi-Rename Tool…", func() { c.showMultiRenameToolFor(view) }),
 		fyne.NewMenuItem("Create Symbolic Link…", func() { c.createSymlink(view, fullPath, c.inactivePaneOf(p)) }),
 		fyne.NewMenuItem("Reveal in File Manager", func() {
 			if err := launch.RevealInFileManager(fullPath, entry.IsDir); err != nil {

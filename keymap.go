@@ -98,6 +98,13 @@ func (c *commander) registerShortcuts() {
 	// via Fyne's own built-in fyne.ShortcutCopy/ShortcutPaste types.
 	c.win.Canvas().AddShortcut(&fyne.ShortcutCopy{}, func(fyne.Shortcut) { c.doCopyToClipboard() })
 	c.win.Canvas().AddShortcut(&fyne.ShortcutPaste{}, func(fyne.Shortcut) { c.doPaste() })
+
+	// Multi-Rename Tool (see multirename_ui.go), matching TotalCmd's Ctrl+M
+	// convention. Literal Ctrl, not the platform-primary modifier: Cmd+M is
+	// already macOS's own Minimize Window shortcut (see this app's own
+	// Cmd/Ctrl+M in the Help window) — same reasoning as Ctrl+U above.
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyM, Modifier: desktop.ControlModifier},
+		func(fyne.Shortcut) { c.showMultiRenameTool() })
 }
 
 // keyBarButton builds one function-key bar button with a tooltip explaining
@@ -181,6 +188,7 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Search…", func() { c.showSearch(c.activePane()) }),
 		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { c.doCopyToClipboard() }),
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { c.doPaste() }),
+		fyne.NewMenuItem("Multi-Rename Tool… (Ctrl+M)", func() { c.showMultiRenameTool() }),
 		hiddenFilesItem,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Panel Colors…", func() {

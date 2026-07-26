@@ -16,7 +16,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "0.4.0" // see FyneApp.toml
+	appVersion = "0.5.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -67,7 +67,12 @@ func main() {
 
 	checkForUpdatesAuto(a) // quiet, once-per-day check; dialog only if an update exists
 
-	win.ShowAndRun()
+	// Show() before installing drag-out: Fyne's GLFW driver creates the
+	// real native window handle lazily on Show(), and dragout.Install
+	// needs that handle to exist (see dragout_ui.go).
+	win.Show()
+	cmdr.installDragOut()
+	a.Run()
 }
 
 // ── Window geometry ──────────────────────────────────────────────────────────

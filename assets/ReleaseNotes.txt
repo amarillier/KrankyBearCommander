@@ -5,11 +5,37 @@ Future ideas:
 - (nothing open right now — see Later phase for bigger/deferred items)
 
 Later phase:
-- drag from commander OUT to other apps (Finder/Explorer/Nautilus) - Fyne has no API for initiating an OS-level drag session, so this needs real native code per platform (NSDraggingSession/OLE drag-source/XDND), unlike the clipboard copy/paste and drag-IN support shipped in 0.4.0 (both use existing public APIs). Nimble didn't support this either, and it's nice-to-have rather than a blocker, so lower priority
-- user ability to resize columns from fixed sizes, then also to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names
-- tags ability - colors - select one or more files, add colored icon. Debatable usefulness - nice quick visual maybe - or add icon capabilities instead for user manual / visual grouping
-- TotalCmd has a really nice file rename option for renaming with patterns, any case to title case, proper case etc. and regex replace patterns - activated by selecting file(s) and Ctrl M. This is really powerful and could use some images from Total Cmd running on a Win system to replicate
+- drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+- user ability to resize columns from fixed sizes, then also to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names. Bundle in a fix for a cosmetic bug found while testing 0.5.0: long Name/Ext/Size/Modified text isn't clipped/truncated and visually overflows into the next column (canvas.Text has no truncation - needs measuring against column width and ellipsizing, e.g. via fyne.TextTruncateEllipsis-style trimming)
 - Connections manager to allow using keychain for credentials if needed, keys etc to connect via rsync (where available), sftp, scp, ../KrankyBearFileMover protocol so a remote share can open in a tab as if just another local directory or file system. Could end up more comprehensive with e.g. box, dropbox, Google Drive - maybe, but we don't necessarily want to do everything
+- tags ability - colors - select one or more files, add colored icon. Debatable usefulness - nice quick visual maybe - or add icon capabilities instead for user manual / visual grouping
+- TotalCmd features worth considering - adding for reminders to look later:
+   - Drive selector buttons for navigation, C:, E: etc
+   - \ and .. buttons above each pane to quick navigate to locked 'home' or up a level rather than double click ..
+   - Refresh button - pane refresh, we already do via F2, but maybe convenient - above each pane makes it clear which pane refreshes
+   - Possible drive right click / eject for Windows USB
+   - Right click drive and format maybe - useful sometimes
+   - 
+
+
+Version 0.5.0 - July 24, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Drag files OUT of a pane straight onto Finder/Explorer, another app
+   (e.g. Slack), or the opposite pane — the reverse of drag-IN (macOS and
+   Windows; Linux still to come). Drags whatever's currently selected (or
+   the cursor row), same rule as Copy/Multi-Rename. A native Cocoa drag
+   session on macOS, not osascript; on Windows, real OLE
+   IDropSource/IDataObject COM objects via DoDragDrop, not a PowerShell
+   subprocess.
+✨ NEW Multi-Rename Tool (Ctrl+M, right-click menu, File menu/F9 popup) —
+   TotalCmd-style batch rename with a pattern language ([N] name, [N1-3]
+   name characters 1-3, [E] extension, [C]/[C:start]/[C:start,step]/
+   [C:start,step,width] counter), whole-name case conversion (UPPERCASE/
+   lowercase/Title Case/Sentence case), and find/replace (plain text or
+   regex) — with a live old→new preview for the whole selection before
+   anything changes on disk. Same-batch collisions (e.g. swapping two
+   files' names) are handled safely via a two-phase rename; anything that
+   would collide with an unrelated existing file is refused up front.
 
 Version 0.4.0 - July 24, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
