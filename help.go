@@ -54,16 +54,26 @@ PANES & TABS:
   back to the locked directory instead of going further; if not, the tab is
   fully pinned and directory changes are refused.
 • ⌂ (Home) goes to the locked directory (if locked) or your home directory.
+• If a tab's current directory has genuinely vanished (e.g. an unmounted/
+  disconnected drive), it jumps back to your home directory automatically
+  instead of getting stuck. A locked tab's lock is unaffected — Home still
+  returns to the original locked location if the drive is reconnected.
 • Swap Panes (Ctrl+U, or the popup menu) exchanges the left and right panes'
   entire tab contents — paths, locks, view mode, sort, selection — at once.
 
 VIEW MODES & SORTING:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Brief: a compact, name-only view wrapped into as many columns as fit.
+• Brief: a compact, name-only view wrapped into as many columns as fit
+  (or a fixed 2/3/4-column count — View menu / F9 popup → Brief Columns).
+  Text too long for its cell is ellipsized (…), same as Full view.
 • Full: adds sortable Name / Ext / Size / Modified / Permissions columns —
   click a header to sort by it, click again to reverse. Sorting by
   Extension breaks ties by name, so files group by type and then
-  alphabetically within each type.
+  alphabetically within each type. Drag the boundary right after a
+  column's header to resize it — applies to every open tab in both panes
+  at once and persists across launches, since column widths are one
+  shared setting, not per-tab. Text too long for its column is ellipsized
+  (…) rather than overflowing into whatever's next to it.
 • Directories always sort before files, and ".." (parent) always comes
   first when the tab isn't already at its filesystem root.
 
@@ -92,8 +102,9 @@ F8  Delete                Sends the selection to the trash.
                           only (see KNOWN LIMITATIONS).
 F9  Menu                  New tab, view mode, Refresh, Swap Panes, Calculate
                           Folder Sizes, Search, Copy/Paste, Multi-Rename
-                          Tool, Show Hidden Files, Panel Colors, Editors,
-                          7-Zip Binary Path, Help, Check for Updates, About.
+                          Tool, Show Hidden Files, Show Volume/Drive
+                          Toolbar, Panel Colors, Editors, 7-Zip Binary
+                          Path, Help, Check for Updates, About.
 F10 Quit                  Quits ` + appName + `.
 Enter                     Opens/navigates into the cursor row, same as a
                           double-click.
@@ -102,6 +113,19 @@ Double-click               A directory navigates into it; a file opens with
                           executable, which launches directly and detached
                           (it keeps running after you quit, and won't get
                           wrapped in a Terminal window on macOS).
+
+VOLUME/DRIVE TOOLBAR:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+A row above each pane's tabs: \ (home), .. (up one level), a refresh
+button (same as F2, and also re-scans for newly connected drives), then
+one button per filesystem root — drive letters on Windows, or "/" plus
+any mounted external volume (USB drive, SD card) on macOS/Linux.
+Scrollable, so a machine with many drives doesn't force the pane wider.
+Shown by default; toggle via View menu or F9 popup ("Show Volume/Drive
+Toolbar"). Right-click a drive button for Eject (hidden for the boot
+volume) or to open the OS's native disk-management tool (Disk Utility /
+Disk Management) — the latter doesn't auto-select any particular drive,
+you choose it yourself in that tool, same as always.
 
 SELECTING FILES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -155,6 +179,10 @@ with a live old→new preview before anything actually changes on disk:
 Renaming two files to each other's names (or any other same-batch
 collision) is handled safely; a new name that would collide with some
 other, unrelated existing file is refused before anything is touched.
+Reopens with whatever Pattern/Case/Find/Replace/Regex you used last time
+already filled in, rather than resetting to defaults.
+After a successful rename, the selection is cleared (since renamed items no
+longer match it); a rejected batch leaves your selection as-is to retry.
 
 COMPRESSING:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

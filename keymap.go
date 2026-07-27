@@ -175,6 +175,12 @@ func (c *commander) doOpenMenu() {
 	hiddenFilesItem := fyne.NewMenuItem("Show Hidden Files", func() { c.toggleHiddenFiles() })
 	hiddenFilesItem.Checked = c.showHiddenFiles
 
+	driveBarItem := fyne.NewMenuItem("Show Volume/Drive Toolbar", func() { c.toggleDriveBar() })
+	driveBarItem.Checked = c.showDriveBar
+
+	briefColumnsItem := fyne.NewMenuItem("Brief Columns", nil)
+	briefColumnsItem.ChildMenu = c.buildBriefColumnsSubmenu(nil)
+
 	menu := fyne.NewMenu("",
 		fyne.NewMenuItem("New Tab (active pane)", func() {
 			p := c.activePane()
@@ -182,6 +188,7 @@ func (c *commander) doOpenMenu() {
 		}),
 		fyne.NewMenuItem("Brief View", func() { c.activePane().setViewMode(panelstate.ViewBrief) }),
 		fyne.NewMenuItem("Full View", func() { c.activePane().setViewMode(panelstate.ViewExpanded) }),
+		briefColumnsItem,
 		fyne.NewMenuItem("Refresh (F2)", func() { c.doRefresh() }),
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { c.swapPanes() }),
 		fyne.NewMenuItem("Calculate Folder Sizes", func() { c.doCalculateFolderSizes() }),
@@ -190,6 +197,7 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { c.doPaste() }),
 		fyne.NewMenuItem("Multi-Rename Tool… (Ctrl+M)", func() { c.showMultiRenameTool() }),
 		hiddenFilesItem,
+		driveBarItem,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Panel Colors…", func() {
 			showColorSchemeSettings(c.app, c.win, c.applyColorScheme)

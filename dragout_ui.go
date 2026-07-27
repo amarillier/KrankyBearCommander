@@ -10,6 +10,7 @@ import (
 	"log"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
 
 	"commander/internal/dragout"
 	"commander/internal/vfs/zipfs"
@@ -35,8 +36,11 @@ func (c *commander) installDragOut() {
 // operation uses (Copy, Multi-Rename, etc. — see
 // fileListView.SelectionOrCursor). Returns nil to leave an ordinary click
 // alone: nothing to drag if the pane is browsing a read-only archive
-// (those aren't real files on disk), nothing is selected/cursored, or the
-// drag started outside the row list itself (toolbar/tabs/status bar).
+// (those aren't real files on disk), nothing is selected/cursored, the
+// drag started outside the row list itself (toolbar/tabs/status bar), or
+// it started on the vertical scrollbar — found the hard way: dragging the
+// scrollbar thumb was being misread as a file drag, since the row list's
+// own bounding box includes the scrollbar strip along its right edge.
 func (c *commander) dragoutHitTest(pos fyne.Position) []string {
 	p := c.paneAt(pos)
 	view := p.activeView()
@@ -49,7 +53,7 @@ func (c *commander) dragoutHitTest(pos fyne.Position) []string {
 
 	origin := fyne.CurrentApp().Driver().AbsolutePositionForObject(view.root)
 	size := view.root.Size()
-	if pos.X < origin.X || pos.X > origin.X+size.Width ||
+	if pos.X < origin.X || pos.X > origin.X+size.Width-theme.ScrollBarSize() ||
 		pos.Y < origin.Y || pos.Y > origin.Y+size.Height {
 		return nil
 	}

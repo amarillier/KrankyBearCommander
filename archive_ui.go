@@ -56,12 +56,14 @@ func (c *commander) showSevenZipSettings() {
 		container.NewBorder(nil, nil, nil, browseBtn, pathEntry),
 	)
 
-	dialog.NewCustomConfirm("7-Zip Binary Path", "Save", "Cancel", content, func(ok bool) {
+	d := dialog.NewCustomConfirm("7-Zip Binary Path", "Save", "Cancel", content, func(ok bool) {
 		if !ok {
 			return
 		}
 		c.saveSevenZipPath(strings.TrimSpace(pathEntry.Text))
-	}, c.win).Show()
+	}, c.win)
+	d.Show()
+	c.win.Canvas().Focus(pathEntry)
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

@@ -12,11 +12,18 @@ fixing and performance work.
 - **Dual panes, multiple tabs per pane** — each tab keeps its own directory,
   view mode, sort, and selection. Tabs can be **locked** to a directory, with
   a choice of whether subdirectories may still be opened (Home/`\`/`/` always
-  snap back to the locked root).
+  snap back to the locked root). If a tab's directory genuinely vanishes
+  (e.g. an unmounted drive), it jumps back to your home directory instead of
+  getting stuck — a lock itself is unaffected, so Home still finds the
+  original location again once it's back.
 - **Brief and Full (detailed) views** — Brief is a compact, name-only wrapped
-  grid; Full adds sortable Name / Ext / Size / Modified / Permissions
-  columns (click a header to sort, click again to reverse). Directories
-  (and `..`) get their own configurable text color, distinct from files.
+  grid, either auto-fit or a fixed 2/3/4-column count (View menu / F9 popup
+  → Brief Columns); Full adds sortable, resizable Name / Ext / Size /
+  Modified / Permissions columns (click a header to sort, click again to
+  reverse; drag the boundary after a header to resize — applies everywhere
+  and persists). Both views ellipsize names too long for their column/cell
+  instead of overflowing into whatever's next to them. Directories (and
+  `..`) get their own configurable text color, distinct from files.
 - **Classic F-key row**: F1 Help, F2 Refresh, F3 View, F4 Edit, F5 Copy, F6
   Move/Rename, F7 MkDir, F8 Delete (to trash), Shift+F8 delete permanently,
   F9 menu, F10 Quit — both as on-screen buttons and real keyboard shortcuts,
@@ -47,6 +54,14 @@ fixing and performance work.
   drag session on macOS, real OLE COM objects via `DoDragDrop` on Windows;
   neither uses osascript or PowerShell. Linux support is planned but not
   yet available.
+- **Volume/drive toolbar** above each pane: `\` (home), `..` (up), refresh
+  (also re-scans for newly connected drives), then one button per
+  filesystem root (drive letters on Windows, or `/` plus any mounted
+  external volume on macOS/Linux) — scrollable, toggle via View menu/F9
+  popup. Right-click a drive for Eject (macOS `diskutil`, Windows native
+  IOCTLs — hidden for the boot volume, detected by device ID so a renamed
+  "Macintosh HD" is still caught) or to open the native Disk
+  Utility/Disk Management tool.
 - **Browse into .zip archives** — double-click a .zip to browse it like a
   real directory (tabs, sorting, selection all work); F5 extracts instead of
   copying, F3 previews a file (or lets you pick one to preview without fully

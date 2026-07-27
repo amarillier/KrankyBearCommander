@@ -51,9 +51,11 @@ func (c *commander) blockIfArchive(view *fileListView) bool {
 // open (see Reload's ScrollToTop doc comment for the stale-listing artifact
 // this also guards against).
 func (c *commander) doRefresh() {
-	if v := c.activePane().activeView(); v != nil {
+	p := c.activePane()
+	if v := p.activeView(); v != nil {
 		v.Reload()
 	}
+	p.rescanDriveBar()
 }
 
 // ── F5 Copy ──────────────────────────────────────────────────────────────────
@@ -119,12 +121,15 @@ func (c *commander) doMoveOrRename() {
 		nameEntry := widget.NewEntry()
 		nameEntry.SetText(filepath.Join(dst.Path, filepath.Base(oldPath)))
 		content := container.NewVBox(widget.NewLabel("Rename/Move to:"), nameEntry)
-		dialog.NewCustomConfirm("Rename / Move", "OK", "Cancel", content, func(ok bool) {
+		d := dialog.NewCustomConfirm("Rename / Move", "OK", "Cancel", content, func(ok bool) {
 			if !ok || strings.TrimSpace(nameEntry.Text) == "" {
 				return
 			}
 			c.performRename(oldPath, nameEntry.Text, src)
-		}, c.win).Show()
+		}, c.win)
+		d.Resize(fyne.NewSize(560, 160))
+		d.Show()
+		c.win.Canvas().Focus(nameEntry)
 		return
 	}
 
@@ -180,10 +185,13 @@ func (c *commander) doMkdir() {
 		}
 		p.activeView().Reload()
 	}, c.win)
+	d.Resize(fyne.NewSize(560, 160))
 	d.Show()
-	// Select the prefilled name so typing immediately replaces it — Entry's
-	// select-all shortcut only takes effect once the widget is actually
-	// rendered, which Show() just triggered.
+	// Focus + select the prefilled name so it's ready to type over
+	// immediately — no click-to-focus needed first, matching every other
+	// typing modal — Entry's select-all shortcut only takes effect once the
+	// widget is actually rendered, which Show() just triggered.
+	c.win.Canvas().Focus(nameEntry)
 	nameEntry.TypedShortcut(&fyne.ShortcutSelectAll{})
 }
 
@@ -316,6 +324,7 @@ func showConflictDialog(win fyne.Window, destPath string, resultCh chan<- confli
 	)
 	d = dialog.NewCustomWithoutButtons("File Exists", content, win)
 	d.Show()
+	win.Canvas().Focus(nameEntry)
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

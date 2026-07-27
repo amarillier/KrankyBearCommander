@@ -87,18 +87,55 @@ func (FS) HomeDir() (string, error) {
 	return os.UserHomeDir()
 }
 
-// Roots returns "/" on Unix-like systems, or one entry per currently
-// accessible drive letter (e.g. "C:\\") on Windows.
+// Roots returns one entry per currently accessible drive letter (e.g.
+// "C:\\") on Windows, or "/" plus one entry per mounted external volume on
+// macOS/Linux — without that second part, an external drive (USB stick,
+// SD card) never gets its own entry at all: it's only reachable by
+// browsing into /Volumes or /media by hand, since it isn't "/" itself.
 func (FS) Roots() ([]string, error) {
-	if runtime.GOOS != "windows" {
-		return []string{"/"}, nil
+	switch runtime.GOOS {
+	case "windows":
+		var roots []string
+		for c := byte('A'); c <= 'Z'; c++ {
+			root := string(c) + `:\`
+			if _, err := os.Stat(root); err == nil {
+				roots = append(roots, root)
+			}
+		}
+		return roots, nil
+	case "darwin":
+		roots := []string{"/"}
+		roots = append(roots, mountedSubdirs("/Volumes")...)
+		return roots, nil
+	default: // linux and other Unix: no single standard mount point, so
+		// check every convention in use across desktop environments
+		// (gvfs/udisks2-based auto-mounters use /media/$USER, some
+		// distros/older setups use /run/media/$USER).
+		roots := []string{"/"}
+		if user := os.Getenv("USER"); user != "" {
+			roots = append(roots, mountedSubdirs(filepath.Join("/media", user))...)
+			roots = append(roots, mountedSubdirs(filepath.Join("/run/media", user))...)
+		}
+		return roots, nil
 	}
-	var roots []string
-	for c := byte('A'); c <= 'Z'; c++ {
-		root := string(c) + `:\`
-		if _, err := os.Stat(root); err == nil {
-			roots = append(roots, root)
+}
+
+// mountedSubdirs lists base's immediate children as full paths — used for
+// the external-volume mount points above, where each subdirectory (or
+// symlink to one, as some macOS volumes appear) is a separately mounted
+// filesystem worth its own root entry. Returns nil (not an error) if base
+// doesn't exist, which is the common case on a machine with nothing
+// external mounted.
+func mountedSubdirs(base string) []string {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil
+	}
+	var subdirs []string
+	for _, e := range entries {
+		if e.IsDir() || e.Type()&os.ModeSymlink != 0 {
+			subdirs = append(subdirs, filepath.Join(base, e.Name()))
 		}
 	}
-	return roots, nil
+	return subdirs
 }

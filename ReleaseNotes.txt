@@ -1,22 +1,116 @@
-Release notes
-KrankyBear Commander: a free, cross-platform dual-pane file manager for Windows, Linux and macOS.
-
 Future ideas:
-- (nothing open right now — see Later phase for bigger/deferred items)
-
-Later phase:
-- drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
-- user ability to resize columns from fixed sizes, then also to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names. Bundle in a fix for a cosmetic bug found while testing 0.5.0: long Name/Ext/Size/Modified text isn't clipped/truncated and visually overflows into the next column (canvas.Text has no truncation - needs measuring against column width and ellipsizing, e.g. via fyne.TextTruncateEllipsis-style trimming)
+- Excel-style double-click a column boundary to auto-fit that column's width to its longest visible name - nice-to-have, not a hard need
+- user ability to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names (column widths themselves are now resizable — this is just about extra window width beyond the columns' own total going somewhere useful instead of blank space)
 - Connections manager to allow using keychain for credentials if needed, keys etc to connect via rsync (where available), sftp, scp, ../KrankyBearFileMover protocol so a remote share can open in a tab as if just another local directory or file system. Could end up more comprehensive with e.g. box, dropbox, Google Drive - maybe, but we don't necessarily want to do everything
-- tags ability - colors - select one or more files, add colored icon. Debatable usefulness - nice quick visual maybe - or add icon capabilities instead for user manual / visual grouping
-- TotalCmd features worth considering - adding for reminders to look later:
-   - Drive selector buttons for navigation, C:, E: etc
-   - \ and .. buttons above each pane to quick navigate to locked 'home' or up a level rather than double click ..
-   - Refresh button - pane refresh, we already do via F2, but maybe convenient - above each pane makes it clear which pane refreshes
-   - Possible drive right click / eject for Windows USB
-   - Right click drive and format maybe - useful sometimes
-   - 
 
+Later phase someday maybe if practical - low priority now
+- drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+
+
+Version 0.6.0 - July 27, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Volume/drive toolbar above each pane: \ (home), .. (up), ⟳ (refresh —
+   same as F2), then one button per filesystem root (drive letters on
+   Windows, or "/" plus any mounted external volume under /Volumes on
+   macOS / /media, /run/media on Linux), scrollable so many drives don't
+   force the pane wider. Shown by default; toggle via View menu / F9 popup
+   ("Show Volume/Drive Toolbar"), persisted across launches.
+🐛 FIX External volumes (USB drives, SD cards) never got their own
+   entry at all on macOS/Linux — Roots() only ever returned "/" there,
+   so an external drive was reachable only by browsing into /Volumes or
+   /media by hand. Now enumerated alongside "/", fixing this both for the
+   new drive toolbar and the existing ★ Favorites volume list.
+✨ NEW Refresh (F2, and the drive toolbar's ⟳) now also re-scans the
+   drive/volume list, so a drive connected after launch shows up without
+   restarting — deliberately not a live/automatic OS-level hook (e.g.
+   Windows' WM_DEVICECHANGE, which is how TotalCmd detects insertion
+   instantly): considered, but decided the extra native code isn't worth
+   it if a refresh click covers it.
+✨ NEW Right-click a drive/volume toolbar button for Eject or Open Disk
+   Utility…/Disk Management… Eject is hidden for the boot volume, detected
+   by comparing device IDs rather than by name/path — macOS's separate
+   System/Data volume architecture also surfaces the boot volume under
+   /Volumes with its own (possibly renamed) entry, which a plain "/" check
+   alone would miss. Ejecting a drive a tab (in either pane) is currently
+   browsing sends that tab home first, so you're never left staring at a
+   pane pointed at a directory that just vanished — same as TotalCmd.
+   Format deliberately just opens the native tool rather than trying to
+   auto-select a specific drive — there's no reliable, safe cross-platform
+   way to target a destructive operation like that.
+   macOS: Eject via diskutil, Format opens Disk Utility.
+   Windows: opening Disk Management always needs administrator rights —
+   requesting that (ShellExecute's "runas", the same UAC prompt as
+   right-clicking a shortcut and choosing "Run as administrator") replaced
+   an initial attempt that just failed outright, since a plain subprocess
+   can't request elevation at all. Eject turned out to need the same
+   elevation if done via the "obvious" raw volume lock/dismount/eject
+   IOCTLs — but unlike Format, prompting UAC on every eject would be worse
+   than Explorer's own (no elevation needed). Ejects via the same
+   Shell.Application COM automation Explorer's own right-click Eject uses
+   instead, avoiding that entirely.
+✨ NEW Multi-Rename Tool remembers your last-used Pattern, Case, Find,
+   Replace, and Regex settings and reopens with them prefilled, instead of
+   resetting to "[N]"/No Change/empty every time — saved when you click
+   Rename, even if that particular batch gets rejected (e.g. a name
+   collision), so a rejected attempt's settings aren't lost either.
+✨ NEW Multi-Rename Tool deselects everything after a successful rename,
+   rather than leaving a confusing leftover selection: since selection is
+   tracked by name, a file that got renamed silently fell out of it while
+   everything else stayed selected. A rejected batch leaves the selection
+   alone, since you'll likely want to retry it as-is.
+✨ NEW Full view's columns (Name/Ext/Size/Modified) are resizable — drag
+   the boundary right after a column's header. Applies live to every open
+   tab in both panes at once (column widths are one shared, app-wide
+   setting, not per-tab) and persists across launches.
+🐛 FIX Long Name/Ext/Size/Modified/Perm text wasn't clipped/truncated at
+   all and visually overflowed, unclipped, into whatever was drawn next to
+   it — canvas.Text has no truncation of its own. Now ellipsized (…) to
+   fit its column, same as real file managers.
+🐛 FIX Multi-Rename Tool's Title Case option could mis-capitalize a letter
+   right after a digit run with no actual word boundary before it — e.g.
+   "80s" wrongly became "80S" — which could then falsely report "already
+   exists" against the very file it came from, since macOS/Windows
+   filesystems are case-insensitive and the collision-check compared
+   names byte-for-byte. Both fixed: Title Case no longer treats digits as
+   a word boundary, and the collision check is now case-insensitive too
+   (so a legitimate case-only rename, like this one, is recognized as "the
+   same file, re-cased," not a collision with an unrelated one).
+🐛 FIX Dragging a pane's vertical scrollbar (macOS and Windows) could be
+   misread as starting a file drag-out, since the row list's own bounding
+   box the drag-out hit-test uses included the scrollbar strip along its
+   right edge. Now excluded.
+✨ NEW Search…, Multi-Rename Tool…, F6 Rename/Move, F7 New Folder, Create
+   Symbolic Link…, 7-Zip Binary Path…, and Manage Editors… all now put the
+   keyboard cursor straight into the text field when the dialog opens —
+   previously you had to click into the field first before typing, even
+   though Enter already worked to confirm.
+✨ NEW F6 Rename/Move and F7 New Folder's dialogs are noticeably wider, so
+   longer paths/names are actually readable while typing instead of being
+   squeezed into a narrow box.
+🐛 FIX Brief view's file names weren't clipped/truncated at all and
+   visually overflowed into the next cell — same underlying issue as Full
+   view's column text (see above), just never fixed there yet. Now
+   ellipsized (…) to fit each cell, and re-ellipsizes live if the pane is
+   resized.
+✨ NEW Brief view's column count is now selectable (View menu / F9 popup →
+   Brief Columns: Auto/2/3/4) instead of always wrapping at a fixed pixel
+   width — Auto keeps the original behavior, a fixed count stretches to
+   fill the pane's width and holds steady across resizes.
+🐛 FIX Launching could unpredictably take 10-20+ seconds (vs. near-instant)
+   — both panes built a throwaway Home tab before your saved layout
+   replaced it, and that tab's Brief-view render (thrown away either way)
+   turned out to be the very first thing in the whole run to touch Fyne's
+   text-measurement machinery, unusually early (before the window even
+   exists). That default tab is no longer built at all when a saved layout
+   is about to replace it.
+✨ NEW If a tab's current directory (locked or not) has genuinely vanished
+   — most commonly an unmounted/disconnected drive — it now jumps back to
+   your home directory instead of getting stuck showing "no such file or
+   directory" indefinitely. A locked tab's lock itself is untouched: Home
+   (or reopening the tab) still returns to the original locked location if
+   the drive is reconnected later. Left alone for any other error
+   (permission denied, a real network timeout, ...), which you should
+   still see rather than get silently redirected past.
 
 Version 0.5.0 - July 24, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

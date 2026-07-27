@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
@@ -27,6 +28,8 @@ type pane struct {
 	win                  fyne.Window
 	colors               func() ColorScheme
 	showHidden           func() bool // dotfile visibility — shared app-wide setting, see commander.toggleHiddenFiles
+	showDriveBar         func() bool // volume/drive toolbar visibility — shared app-wide setting, see commander.toggleDriveBar
+	briefColumns         func() int  // Brief view column count (0 = Auto) — shared app-wide setting, see commander.setBriefColumns
 	isActivePane         func() bool
 	onActivated          func() // this pane was clicked into; tell commander to make it active
 	onStatus             func(msg string)
@@ -35,6 +38,7 @@ type pane struct {
 	onContextMenu        func(p *pane, view *fileListView, name string, pos fyne.Position) // right-click on a row; commander owns the menu (contextmenu_ui.go)
 	onSearch             func()                                                            // Search button clicked; commander owns the search dialog (search_ui.go)
 	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)                   // Enter/double-click on a file inside an open archive; commander extracts + opens it (archive_browse_ui.go)
+	onEject              func(root string) error                                           // Eject clicked on a drive button; commander navigates both panes off it first (drivebutton_ui.go)
 
 	tabs   *container.DocTabs
 	views  []*fileListView
@@ -42,6 +46,7 @@ type pane struct {
 
 	statusLabel *widget.Label
 	lockBtn     *ttwidget.Button
+	driveBar    *container.Scroll
 
 	lastCursorInfo string
 	lastSelCount   int
@@ -50,8 +55,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onOpenArchivedMember: onOpenArchivedMember}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -64,7 +69,7 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	p.lockBtn = ttwidget.NewButton("🔓", func() { p.onActivated(); p.toggleLock(); unfocus() })
 	p.lockBtn.SetToolTip("Lock this tab to its current directory (with a choice of whether subdirectories can still be opened)")
 
-	homeBtn := ttwidget.NewButton("⌂", func() { p.onActivated(); p.activateHome(); unfocus() })
+	homeBtn := ttwidget.NewButtonWithIcon("", theme.HomeIcon(), func() { p.onActivated(); p.activateHome(); unfocus() })
 	homeBtn.SetToolTip("Go to the locked directory (if locked) or your home directory")
 
 	briefBtn := ttwidget.NewButton("Brief", func() { p.onActivated(); p.setViewMode(panelstate.ViewBrief); unfocus() })
@@ -83,7 +88,7 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	})
 	selectAllBtn.SetToolTip("Select All / Deselect All (Ctrl+A / Ctrl+Shift+A, ⌘ on macOS)")
 
-	searchBtn := ttwidget.NewButton("🔍", func() {
+	searchBtn := ttwidget.NewButtonWithIcon("", theme.SearchIcon(), func() {
 		p.onActivated()
 		if p.onSearch != nil {
 			p.onSearch()
@@ -93,6 +98,7 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	searchBtn.SetToolTip("Search this tab's directory recursively by name or pattern")
 
 	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn)
+	p.driveBar = container.NewHScroll(p.buildDriveBarContent())
 
 	p.tabs = container.NewDocTabs()
 	p.tabs.CreateTab = func() *container.TabItem {
@@ -121,9 +127,18 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 		p.refreshChrome()
 	}
 
-	p.addTabFromState(panelstate.New(p.defaultHome()))
+	// No default tab is added here: for a returning user, commander.go's
+	// loadLayout() (right after both panes are constructed) replaces
+	// whatever's here with the persisted tabs anyway, so building one now
+	// would just be thrown-away work — reading a directory, sorting it, and
+	// rendering a whole view (Brief's is the app's very first text
+	// measurement of the whole run, before the window even exists, which
+	// once made a real difference — see ensureAtLeastOneTab). loadLayout
+	// calls ensureAtLeastOneTab right after, so a pane never ends up with
+	// zero tabs even on a fresh install / corrupt layout file.
 
-	p.root = container.NewBorder(toolbar, p.statusLabel, nil, nil, p.tabs)
+	p.root = container.NewBorder(container.NewVBox(toolbar, p.driveBar), p.statusLabel, nil, nil, p.tabs)
+	p.refreshDriveBarVisibility()
 	return p
 }
 
@@ -158,7 +173,7 @@ func (p *pane) defaultHome() string {
 // parallel slices (and eventually panicking on tab close with an
 // out-of-range slice index).
 func (p *pane) newTabItem(state *panelstate.State) *container.TabItem {
-	view := newFileListView(p.fs, state, p.colors, p.showHidden, p.isActivePane)
+	view := newFileListView(p.fs, state, p.colors, p.showHidden, p.briefColumns, p.defaultHome, p.isActivePane)
 	p.bindView(view)
 
 	item := container.NewTabItem(tabLabel(state), view.Build())
@@ -250,6 +265,91 @@ func (p *pane) activeState() *panelstate.State {
 func (p *pane) activateHome() {
 	if v := p.activeView(); v != nil {
 		v.Home(p.defaultHome())
+	}
+}
+
+// buildDriveBarContent builds the volume/drive toolbar's row: \ (home) and
+// .. (up) — duplicating the main toolbar's ⌂ and the file list's own ".."
+// row, but grouped here for a dedicated navigation toolbar's clarity —
+// then Refresh, then one button per filesystem root (drive letters on
+// Windows, "/" elsewhere, plus any mounted external volume — see
+// localfs.Roots). Wrapped in an HScroll by the caller so a Windows machine
+// with many drive letters doesn't force the pane wider; the fixed nav
+// buttons come first so they're always visible without scrolling.
+//
+// Rebuilt (not just re-laid-out) by rescanDriveBar whenever Refresh is
+// clicked: unlike the current directory's contents, there's no portable
+// "tell me when a drive was plugged in" signal here, so re-scanning
+// Roots() on an explicit user action (rather than trying to hook OS
+// device-change notifications, e.g. Windows' WM_DEVICECHANGE) is the
+// deliberately simpler choice — see ReleaseNotes.txt's Later-phase note if
+// live auto-detection is ever worth the platform-specific work.
+func (p *pane) buildDriveBarContent() fyne.CanvasObject {
+	unfocus := func() { p.win.Canvas().Unfocus() }
+
+	homeBtn := ttwidget.NewButton("\\", func() { p.onActivated(); p.activateHome(); unfocus() })
+	homeBtn.SetToolTip("Go to the locked directory (if locked) or your home directory")
+
+	upBtn := ttwidget.NewButton("..", func() {
+		p.onActivated()
+		if v := p.activeView(); v != nil {
+			v.NavigateUp()
+		}
+		unfocus()
+	})
+	upBtn.SetToolTip("Go up one directory level")
+
+	refreshBtn := ttwidget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+		p.onActivated()
+		if v := p.activeView(); v != nil {
+			v.Reload()
+		}
+		p.rescanDriveBar()
+		unfocus()
+	})
+	refreshBtn.SetToolTip("Refresh this pane's current directory (F2) and re-scan for newly connected drives")
+
+	items := []fyne.CanvasObject{homeBtn, upBtn, refreshBtn, widget.NewSeparator()}
+
+	roots, err := p.fs.Roots()
+	if err != nil {
+		roots = nil
+	}
+	for _, r := range roots {
+		root := r
+		driveBtn := newDriveButton(root, func() {
+			p.onActivated()
+			if v := p.activeView(); v != nil {
+				v.JumpTo(root)
+			}
+			unfocus()
+		}, func(pos fyne.Position) {
+			p.onActivated()
+			p.showDriveContextMenu(root, pos)
+		})
+		driveBtn.SetToolTip("Jump to " + root + " (right-click for Eject/Format)")
+		items = append(items, driveBtn)
+	}
+
+	return container.NewHBox(items...)
+}
+
+// rescanDriveBar rebuilds the volume/drive toolbar's buttons from a fresh
+// Roots() call — the only way a newly connected drive (or one that was
+// removed) is picked up without restarting the app.
+func (p *pane) rescanDriveBar() {
+	p.driveBar.Content = p.buildDriveBarContent()
+	p.driveBar.Refresh()
+}
+
+// refreshDriveBarVisibility shows or hides the volume/drive toolbar per
+// the shared showDriveBar setting — called once at construction and again
+// whenever commander.toggleDriveBar flips it.
+func (p *pane) refreshDriveBarVisibility() {
+	if p.showDriveBar != nil && p.showDriveBar() {
+		p.driveBar.Show()
+	} else {
+		p.driveBar.Hide()
 	}
 }
 
@@ -347,8 +447,8 @@ func (p *pane) snapshot() layout.PaneLayout {
 	return pl
 }
 
-// restoreFromLayout replaces this pane's tabs (the single default tab
-// created at construction) with a persisted arrangement.
+// restoreFromLayout replaces this pane's tabs (none yet — see newPane) with
+// a persisted arrangement.
 func (p *pane) restoreFromLayout(pl layout.PaneLayout) {
 	for len(p.tabs.Items) > 0 {
 		p.tabs.RemoveIndex(0)
@@ -362,6 +462,22 @@ func (p *pane) restoreFromLayout(pl layout.PaneLayout) {
 	if pl.ActiveTab >= 0 && pl.ActiveTab < len(p.tabs.Items) {
 		p.tabs.SelectIndex(pl.ActiveTab)
 	}
+	p.refreshChrome()
+}
+
+// ensureAtLeastOneTab adds the default Home tab if this pane still has none
+// — the case on a fresh install (no saved layout yet) or if the saved
+// layout failed to load / had no tabs for this side. commander.go calls
+// this right after loadLayout(), once per pane. newPane deliberately
+// doesn't add this tab itself: for a returning user it would just be
+// immediately discarded by restoreFromLayout, after paying for a real
+// directory read, sort, and render (including Brief view's per-cell text
+// measurement) before the window has even been shown.
+func (p *pane) ensureAtLeastOneTab() {
+	if len(p.views) > 0 {
+		return
+	}
+	p.addTabFromState(panelstate.New(p.defaultHome()))
 	p.refreshChrome()
 }
 

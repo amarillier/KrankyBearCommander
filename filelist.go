@@ -36,11 +36,13 @@ const doubleTapWindow = 450 * time.Millisecond
 
 // fileListView renders and drives one tab's directory listing.
 type fileListView struct {
-	fs         vfs.FileSystem
-	state      *panelstate.State
-	colors     func() ColorScheme
-	showHidden func() bool // dotfile visibility — shared app-wide setting, see commander.toggleHiddenFiles
-	isActive   func() bool // whether this view's pane is the app's currently-active pane
+	fs           vfs.FileSystem
+	state        *panelstate.State
+	colors       func() ColorScheme
+	showHidden   func() bool   // dotfile visibility — shared app-wide setting, see commander.toggleHiddenFiles
+	briefColumns func() int    // Brief view column count (0 = Auto, fills width at a fixed cell width) — shared app-wide setting, see commander.setBriefColumns
+	defaultHome  func() string // pane.defaultHome — where Reload jumps this tab if its current directory has vanished (see Reload)
+	isActive     func() bool   // whether this view's pane is the app's currently-active pane
 
 	onNavigated   func()                               // Path changed; let paneview refresh its tab title
 	onStatus      func(msg string)                     // brief status-line message, e.g. "tab is locked"
@@ -92,8 +94,8 @@ type fileListView struct {
 	activeRenameField *renameEntry
 }
 
-func newFileListView(fs vfs.FileSystem, state *panelstate.State, colors func() ColorScheme, showHidden func() bool, isActive func() bool) *fileListView {
-	return &fileListView{fs: fs, state: state, colors: colors, showHidden: showHidden, isActive: isActive, lastTapRow: -1}
+func newFileListView(fs vfs.FileSystem, state *panelstate.State, colors func() ColorScheme, showHidden func() bool, briefColumns func() int, defaultHome func() string, isActive func() bool) *fileListView {
+	return &fileListView{fs: fs, state: state, colors: colors, showHidden: showHidden, briefColumns: briefColumns, defaultHome: defaultHome, isActive: isActive, lastTapRow: -1}
 }
 
 // Build constructs the view's canvas objects and loads the initial listing.
@@ -104,7 +106,14 @@ func (v *fileListView) Build() fyne.CanvasObject {
 	v.header[2] = widget.NewButton("", func() { v.setSort(panelstate.SortSize) })
 	v.header[3] = widget.NewButton("", func() { v.setSort(panelstate.SortModified) })
 	v.permHeader = widget.NewLabel("Perm")
-	v.headerRow = container.New(columnsLayout{}, v.header[0], v.header[1], v.header[2], v.header[3], v.permHeader)
+	labels := container.New(columnsLayout{}, v.header[0], v.header[1], v.header[2], v.header[3], v.permHeader)
+	// One resize handle per boundary BETWEEN columns (not after the last,
+	// Perm) — a separate overlay stacked on top of the label row, so
+	// adding resize handles doesn't touch columnsLayout's own object list.
+	handles := container.New(resizeHandleLayout{},
+		newColumnResizeHandle(colName), newColumnResizeHandle(colExt),
+		newColumnResizeHandle(colSize), newColumnResizeHandle(colModified))
+	v.headerRow = container.NewStack(labels, handles)
 	v.root = container.NewStack()
 	v.Reload()
 	return v.root
@@ -126,6 +135,31 @@ func (v *fileListView) Reload() {
 	v.computedSizes = nil
 	v.computedParentSize = nil
 	entries, err := v.fs.ReadDir(v.state.Path)
+	if err != nil && vfs.IsNotExist(err) && v.defaultHome != nil {
+		// The tab's directory has genuinely vanished from under it — most
+		// commonly an unmounted/disconnected drive (USB, network share) it
+		// was sitting in or locked to — rather than leaving the pane stuck
+		// showing "no such file or directory" indefinitely, jump home. This
+		// is a Jump, not a Navigate: it works even on a fully-locked tab,
+		// and never touches Locked/LockedRoot (see panelstate.State.Jump),
+		// so a locked tab's Home button still resolves back to the very
+		// same (now-missing) locked root afterward — if the drive is
+		// reconnected later, Home (or reopening this tab) finds it again.
+		// Left alone for any other error (permission denied, a real network
+		// timeout, ...) since those are worth the user actually seeing.
+		if home := v.defaultHome(); home != "" && home != v.state.Path {
+			oldPath := v.state.Path
+			v.adjustFSForTarget(home)
+			v.state.Jump(home)
+			if v.onStatus != nil {
+				v.onStatus(oldPath + " is no longer available — moved to home")
+			}
+			if v.onNavigated != nil {
+				v.onNavigated()
+			}
+			entries, err = v.fs.ReadDir(v.state.Path)
+		}
+	}
 	if err != nil {
 		if v.onStatus != nil {
 			v.onStatus("cannot read " + v.state.Path + ": " + err.Error())
@@ -364,6 +398,27 @@ var columnWidths = [tableColumnCount]float32{
 	colPerm:     100,
 }
 
+// prefColumnWidthKeys names each column's persisted width — resizing is a
+// single, shared, app-wide setting (like showHiddenFiles/showDriveBar),
+// not per-tab, matching how columnWidths itself is already a shared
+// package-level array rather than per-view state.
+var prefColumnWidthKeys = [tableColumnCount]string{
+	colName:     "columnWidthName",
+	colExt:      "columnWidthExt",
+	colSize:     "columnWidthSize",
+	colModified: "columnWidthModified",
+	colPerm:     "columnWidthPerm",
+}
+
+// loadColumnWidths overwrites columnWidths' built-in defaults with
+// whatever was persisted, if anything — called once at startup, before
+// any pane/view exists, so their initial construction already reflects it.
+func loadColumnWidths(a fyne.App) {
+	for col, key := range prefColumnWidthKeys {
+		columnWidths[col] = float32(a.Preferences().FloatWithFallback(key, float64(columnWidths[col])))
+	}
+}
+
 // columnsLayout lays out its children left-to-right at exactly columnWidths,
 // with theme.Padding() between them — matching how widget.Table spaces its
 // own columns (see Table's columnAt: `visibleColWidths[i-1] + padding`).
@@ -431,6 +486,22 @@ func (v *fileListView) buildTable() *keyTable {
 	t.SetColumnWidth(colPerm, columnWidths[colPerm])
 	t.OnSelected = v.handleTableTap
 	return t
+}
+
+// applyColumnWidth is commander.columnResized's per-view half: pushes a
+// (already-updated in the shared columnWidths) column width into this
+// view's actual Table, and re-lays-out its header row (labels + resize
+// handles) to match. Called for every open tab in both panes so resizing
+// a column in one pane's Full view is reflected everywhere immediately,
+// since column widths are a single, shared, app-wide setting rather than
+// per-tab.
+func (v *fileListView) applyColumnWidth(col int, width float32) {
+	if v.table != nil {
+		v.table.SetColumnWidth(col, width)
+	}
+	if v.headerRow != nil {
+		v.headerRow.Refresh()
+	}
 }
 
 func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
@@ -556,8 +627,51 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 			txt.Text = entry.Mode.String()
 		}
 	}
+	if !renaming {
+		textSize := txt.TextSize
+		if textSize == 0 {
+			textSize = theme.TextSize()
+		}
+		maxWidth := columnWidths[id.Col] - columnTextMargin(id.Col, check)
+		txt.Text = truncateToWidth(txt.Text, maxWidth, textSize, txt.TextStyle)
+	}
 	check.Refresh()
 	txt.Refresh()
+}
+
+// columnTextMargin is how much of a column's width isn't available to its
+// own text: colName shares its cell with the selection checkbox (see
+// updateCell's Border layout), every column loses a little to padding on
+// each side.
+func columnTextMargin(col int, check *widget.Check) float32 {
+	if col == colName {
+		return check.MinSize().Width + theme.Padding()*2
+	}
+	return theme.Padding() * 2
+}
+
+// truncateToWidth ellipsizes text if it's wider than maxWidth — canvas.Text
+// has no clipping/truncation of its own, so a name (or any other column's
+// text) too wide for its column would otherwise just overflow, unclipped,
+// into whatever's drawn to its right (see the "🐛 FIX" in 0.6.0's
+// ReleaseNotes.txt entry this resolves).
+func truncateToWidth(text string, maxWidth, textSize float32, style fyne.TextStyle) string {
+	if maxWidth <= 0 {
+		return text
+	}
+	full, _ := fyne.CurrentApp().Driver().RenderedTextSize(text, textSize, style, nil)
+	if full.Width <= maxWidth {
+		return text
+	}
+	runes := []rune(text)
+	for i := len(runes) - 1; i > 0; i-- {
+		candidate := string(runes[:i]) + "…"
+		sz, _ := fyne.CurrentApp().Driver().RenderedTextSize(candidate, textSize, style, nil)
+		if sz.Width <= maxWidth {
+			return candidate
+		}
+	}
+	return "…"
 }
 
 // fileExt returns name's extension without the leading dot, or "" for a
@@ -699,8 +813,78 @@ func (v *fileListView) buildBriefGrid() fyne.CanvasObject {
 		}
 		cells = append(cells, v.buildBriefCell(entry, cs))
 	}
-	grid := container.NewGridWrap(fyne.NewSize(180, 28), cells...)
+
+	cols := 0
+	if v.briefColumns != nil {
+		cols = v.briefColumns()
+	}
+	var grid fyne.CanvasObject
+	if cols > 0 {
+		// A fixed column count: cells stretch to fill the available width
+		// (see briefColumnsLayout) instead of wrapping at a fixed pixel
+		// width, so the user's chosen count holds regardless of pane width.
+		grid = container.New(&briefColumnsLayout{columns: cols}, cells...)
+	} else {
+		grid = container.NewGridWrap(fyne.NewSize(180, 28), cells...)
+	}
 	return container.NewVScroll(grid)
+}
+
+// briefCellHeight is every Brief-view cell's fixed row height, in both Auto
+// (GridWrap) and fixed-column (briefColumnsLayout) modes.
+const briefCellHeight = 28
+
+// briefColumnsLayout arranges Brief view cells into exactly Columns per row,
+// with cell width recomputed from the available size on every layout pass
+// (so a fixed column count holds across window/pane resizes) and a constant
+// row height — unlike container.NewGridWithColumns, which stretches row
+// height to fill the whole container and looks wrong for a handful of rows.
+type briefColumnsLayout struct {
+	columns int
+}
+
+func (b *briefColumnsLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	cols := b.columns
+	if cols < 1 {
+		cols = 1
+	}
+	padding := theme.Padding()
+	cellWidth := (size.Width - float32(cols-1)*padding) / float32(cols)
+
+	x, y := float32(0), float32(0)
+	i := 0
+	for _, child := range objects {
+		if !child.Visible() {
+			continue
+		}
+		child.Move(fyne.NewPos(x, y))
+		child.Resize(fyne.NewSize(cellWidth, briefCellHeight))
+		if (i+1)%cols == 0 {
+			x = 0
+			y += briefCellHeight + padding
+		} else {
+			x += cellWidth + padding
+		}
+		i++
+	}
+}
+
+func (b *briefColumnsLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	cols := b.columns
+	if cols < 1 {
+		cols = 1
+	}
+	count := 0
+	for _, child := range objects {
+		if child.Visible() {
+			count++
+		}
+	}
+	rows := (count + cols - 1) / cols
+	if rows < 1 {
+		rows = 1
+	}
+	return fyne.NewSize(0, float32(rows)*briefCellHeight+float32(rows-1)*theme.Padding())
 }
 
 func (v *fileListView) buildBriefCell(entry vfs.Entry, cs ColorScheme) fyne.CanvasObject {
@@ -713,7 +897,7 @@ func (v *fileListView) buildBriefCell(entry vfs.Entry, cs ColorScheme) fyne.Canv
 	bg := canvas.NewRectangle(cs.PanelBG)
 	content := container.NewStack(bg, container.NewPadded(txt))
 
-	return newTappableCell(content, func(mod fyne.KeyModifier) {
+	cell := newTappableCell(content, func(mod fyne.KeyModifier) {
 		if v.onFocusGained != nil {
 			v.onFocusGained()
 		}
@@ -742,6 +926,9 @@ func (v *fileListView) buildBriefCell(entry vfs.Entry, cs ColorScheme) fyne.Canv
 	}, func(e *fyne.PointEvent) {
 		v.offerContextMenu(name, e.AbsolutePosition)
 	})
+	cell.fullText = name
+	cell.truncText = txt
+	return cell
 }
 
 // buildBriefRenameCell is buildBriefCell's rename-mode counterpart —
@@ -913,6 +1100,15 @@ func (v *fileListView) reloadAfterNavigate() {
 // panelstate.State.HomeTarget and JumpTo.
 func (v *fileListView) Home(defaultHome string) {
 	v.JumpTo(v.state.HomeTarget(defaultHome))
+}
+
+// NavigateUp goes to the current directory's parent — the same navigation
+// activate() uses for double-clicking "..", exposed here for the pane's
+// drive/volume toolbar's ".." button. Unlike JumpTo, this respects a
+// locked tab (navigateTo does), matching what double-clicking ".." itself
+// would do.
+func (v *fileListView) NavigateUp() {
+	v.navigateTo(v.fs.Dir(v.state.Path))
 }
 
 // ── selection ────────────────────────────────────────────────────────────────
@@ -1120,6 +1316,15 @@ type tappableCell struct {
 	onDoubleTap     func()
 	onSecondaryTap  func(*fyne.PointEvent)
 	pendingModifier fyne.KeyModifier
+
+	// fullText/truncText, if set (buildBriefCell's name cells; left nil for
+	// the rename cell's Entry, which handles its own text), re-ellipsize on
+	// every resize — canvas.Text has no clipping of its own, and the Brief
+	// grid's cell width varies (Auto's fixed 180px, or a fixed column count
+	// stretched to the pane's current width), so truncating once at build
+	// time isn't enough. Same technique as Full view's truncateToWidth.
+	fullText  string
+	truncText *canvas.Text
 }
 
 func newTappableCell(content fyne.CanvasObject, onTap func(fyne.KeyModifier), onDoubleTap func(), onSecondaryTap func(*fyne.PointEvent)) *tappableCell {
@@ -1130,6 +1335,20 @@ func newTappableCell(content fyne.CanvasObject, onTap func(fyne.KeyModifier), on
 
 func (c *tappableCell) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(c.content)
+}
+
+func (c *tappableCell) Resize(size fyne.Size) {
+	c.BaseWidget.Resize(size)
+	if c.truncText == nil {
+		return
+	}
+	textSize := c.truncText.TextSize
+	if textSize == 0 {
+		textSize = theme.TextSize()
+	}
+	maxWidth := size.Width - theme.Padding()*2
+	c.truncText.Text = truncateToWidth(c.fullText, maxWidth, textSize, c.truncText.TextStyle)
+	c.truncText.Refresh()
 }
 
 func (c *tappableCell) MouseDown(e *desktop.MouseEvent) { c.pendingModifier = e.Modifier }

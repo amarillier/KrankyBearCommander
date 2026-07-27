@@ -175,16 +175,24 @@ func toTitleCase(s string) string {
 	var b strings.Builder
 	newWord := true
 	for _, r := range s {
-		switch {
-		case newWord && unicode.IsLetter(r):
+		if r == ' ' || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+			newWord = true
+			continue
+		}
+		// newWord must be cleared here — not just inside the "is a
+		// letter" case below — otherwise a digit run (e.g. "80s") never
+		// consumes it, so the letter right after gets wrongly treated as
+		// the start of a new word ("80s" -> "80S"): found the hard way,
+		// via a real false "already exists" report where the mis-cased
+		// result collided (case-insensitively) with the file it came
+		// from.
+		if newWord && unicode.IsLetter(r) {
 			b.WriteRune(unicode.ToUpper(r))
-			newWord = false
-		default:
+		} else {
 			b.WriteRune(unicode.ToLower(r))
 		}
-		if r == ' ' || r == '_' || r == '-' || r == '.' {
-			newWord = true
-		}
+		newWord = false
 	}
 	return b.String()
 }

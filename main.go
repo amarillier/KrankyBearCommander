@@ -16,7 +16,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "0.5.0" // see FyneApp.toml
+	appVersion = "0.6.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -140,12 +140,21 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 		fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) })
 	})
 	hiddenFilesItem.Checked = cmdr.showHiddenFiles
+	driveBarItem := fyne.NewMenuItem("Show Volume/Drive Toolbar", func() {
+		cmdr.toggleDriveBar()
+		fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) })
+	})
+	driveBarItem.Checked = cmdr.showDriveBar
+	briefColumnsItem := fyne.NewMenuItem("Brief Columns", nil)
+	briefColumnsItem.ChildMenu = cmdr.buildBriefColumnsSubmenu(func() { fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) }) })
 	viewMenu := fyne.NewMenu("View",
 		fyne.NewMenuItem("Brief View (active pane)", func() { cmdr.activePane().setViewMode(panelstate.ViewBrief) }),
 		fyne.NewMenuItem("Full View (active pane)", func() { cmdr.activePane().setViewMode(panelstate.ViewExpanded) }),
+		briefColumnsItem,
 		fyne.NewMenuItem("Refresh (active pane) (F2)", func() { cmdr.doRefresh() }),
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { cmdr.swapPanes() }),
 		hiddenFilesItem,
+		driveBarItem,
 		fyne.NewMenuItem("Panel Colors…", func() { showColorSchemeSettings(a, win, cmdr.applyColorScheme) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Light Theme", func() { setLightTheme(a) }),

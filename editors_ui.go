@@ -126,6 +126,7 @@ func (c *commander) showManageEditors() {
 	d := dialog.NewCustom("Manage Editors", "Close", content, c.win)
 	d.Resize(fyne.NewSize(480, 480))
 	d.Show()
+	c.win.Canvas().Focus(nameEntry)
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

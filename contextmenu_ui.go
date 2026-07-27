@@ -223,6 +223,7 @@ func (c *commander) createSymlink(view *fileListView, sourcePath string, other *
 	}, c.win)
 	d.Resize(fyne.NewSize(560, 160))
 	d.Show()
+	c.win.Canvas().Focus(nameEntry)
 	nameEntry.TypedShortcut(&fyne.ShortcutSelectAll{})
 }
 

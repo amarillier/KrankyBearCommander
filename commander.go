@@ -5,6 +5,8 @@
 package main
 
 import (
+	"fmt"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
@@ -34,6 +36,8 @@ type commander struct {
 	favorites       favorites.List // shared across both panes — see favorites_ui.go
 	editorConfig    editors.Config // F4 preference — see editors_ui.go
 	showHiddenFiles bool           // dotfile visibility, shared across both panes — see toggleHiddenFiles
+	showDriveBar    bool           // volume/drive toolbar visibility, shared across both panes — see toggleDriveBar
+	briefColumns    int            // Brief view column count, shared across both panes (0 = Auto) — see setBriefColumns
 	sevenZipPath    string         // optional 7z/7za/7zz binary override — see archive_ui.go
 
 	left  *pane
@@ -48,14 +52,17 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c := &commander{app: a, win: win, fs: localfs.New()}
 	c.colorScheme = loadColorScheme(a)
 	c.showHiddenFiles = a.Preferences().Bool(prefShowHiddenFiles)
+	c.showDriveBar = a.Preferences().BoolWithFallback(prefShowDriveBar, true)
+	c.briefColumns = a.Preferences().IntWithFallback(prefBriefColumns, 0)
+	loadColumnWidths(a) // before any pane/view is built, so their initial SetColumnWidth calls already reflect this
 	c.statusBar = widget.NewLabel("")
 
 	c.loadFavorites()
 	c.loadEditors()
 	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, c.openArchivedMember)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, c.openArchivedMember)
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, c.openArchivedMember, c.ejectDrive)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, c.openArchivedMember, c.ejectDrive)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5
@@ -66,6 +73,8 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 
 	c.registerShortcuts()
 	c.loadLayout()
+	c.left.ensureAtLeastOneTab()
+	c.right.ensureAtLeastOneTab()
 	return c
 }
 
@@ -150,6 +159,91 @@ func (c *commander) toggleHiddenFiles() {
 	}
 	for _, v := range c.right.views {
 		v.Reload()
+	}
+}
+
+// prefShowDriveBar persists the volume/drive toolbar's visibility, same
+// pattern as prefShowHiddenFiles — defaults to shown (true) so the new
+// toolbar is discoverable on first run rather than needing to be found
+// via a menu first.
+const prefShowDriveBar = "showDriveBar"
+
+// toggleDriveBar flips the volume/drive toolbar's visibility in both panes
+// and persists it.
+func (c *commander) toggleDriveBar() {
+	c.showDriveBar = !c.showDriveBar
+	c.app.Preferences().SetBool(prefShowDriveBar, c.showDriveBar)
+	c.left.refreshDriveBarVisibility()
+	c.right.refreshDriveBarVisibility()
+}
+
+// prefBriefColumns persists Brief view's column count, same pattern as
+// prefShowHiddenFiles — 0 means Auto (fills the pane width at a fixed cell
+// width, the original behavior).
+const prefBriefColumns = "briefColumns"
+
+// briefColumnChoices is every selectable column count, in menu order —
+// "reasonable maximum" per user request, since more columns than this
+// leaves too little width per name to be useful.
+var briefColumnChoices = []int{0, 2, 3, 4}
+
+func briefColumnLabel(n int) string {
+	if n == 0 {
+		return "Auto"
+	}
+	return fmt.Sprintf("%d Columns", n)
+}
+
+// setBriefColumns changes Brief view's column count in both panes and
+// persists it — same pattern as toggleHiddenFiles.
+func (c *commander) setBriefColumns(n int) {
+	c.briefColumns = n
+	c.app.Preferences().SetInt(prefBriefColumns, n)
+	for _, v := range c.left.views {
+		v.Reload()
+	}
+	for _, v := range c.right.views {
+		v.Reload()
+	}
+}
+
+// buildBriefColumnsSubmenu is Auto/2/3/4, checkmarking the current choice —
+// used by both the View menu and the F9 popup (buildEditorsSubmenu in
+// editors_ui.go is the same pattern). afterSelect runs after the setting
+// changes — the main menu bar (unlike the F9 popup, rebuilt fresh on every
+// open) is persistent, so main.go passes a callback that rebuilds it via
+// fyne.Do so the new checkmark actually shows; the F9 popup passes nil.
+func (c *commander) buildBriefColumnsSubmenu(afterSelect func()) *fyne.Menu {
+	items := make([]*fyne.MenuItem, len(briefColumnChoices))
+	for i, n := range briefColumnChoices {
+		n := n
+		item := fyne.NewMenuItem(briefColumnLabel(n), func() {
+			c.setBriefColumns(n)
+			if afterSelect != nil {
+				afterSelect()
+			}
+		})
+		item.Checked = c.briefColumns == n
+		items[i] = item
+	}
+	return fyne.NewMenu("", items...)
+}
+
+// columnResized is every columnResizeHandle's entry point (via the global
+// cmdr, the same way main.go's menu/tray callbacks reach it): column
+// widths are shared/app-wide, so a resize in any one tab's Full view must
+// immediately reach every other open tab in both panes, not just the one
+// being dragged. Persisting only once the drag actually finishes (final)
+// avoids a Preferences write on every pixel of movement.
+func (c *commander) columnResized(col int, width float32, final bool) {
+	for _, v := range c.left.views {
+		v.applyColumnWidth(col, width)
+	}
+	for _, v := range c.right.views {
+		v.applyColumnWidth(col, width)
+	}
+	if final {
+		c.app.Preferences().SetFloat(prefColumnWidthKeys[col], float64(width))
 	}
 }
 

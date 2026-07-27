@@ -5,6 +5,7 @@
 package vfs
 
 import (
+	"errors"
 	"io"
 	"io/fs"
 	"time"
@@ -42,4 +43,15 @@ type FileSystem interface {
 	// Roots returns the top-level entry points for navigation: "/" on Unix,
 	// or one entry per drive letter on Windows.
 	Roots() ([]string, error)
+}
+
+// IsNotExist reports whether err means path genuinely doesn't exist (e.g. an
+// unmounted/disconnected drive) as opposed to some other failure (permission
+// denied, a network timeout, ...) — callers use this to decide whether it's
+// safe to navigate away rather than just showing the error, without package
+// main ever depending on os.* directly (see the package doc above). Every
+// backend's errors should satisfy fs.ErrNotExist via errors.Is for this to
+// work; the local backend's os.ReadDir/os.Stat errors already do.
+func IsNotExist(err error) bool {
+	return errors.Is(err, fs.ErrNotExist)
 }

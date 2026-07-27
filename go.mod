@@ -6,6 +6,7 @@ require (
 	fyne.io/fyne/v2 v2.7.4
 	github.com/amarillier/go-update-checker v0.0.5
 	github.com/dweymouth/fyne-tooltip v0.4.0
+	github.com/go-ole/go-ole v1.3.0
 	github.com/hashicorp/go-version v1.3.0
 	golang.org/x/sys v0.46.0
 )

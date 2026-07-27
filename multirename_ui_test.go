@@ -109,3 +109,35 @@ func TestApplyMultiRenameRejectsCollisionWithUnrelatedFile(t *testing.T) {
 		t.Fatal("a.txt should be untouched after a rejected batch")
 	}
 }
+
+// TestApplyMultiRenameCaseOnlyRenameOfSelf is a regression test for a real
+// false "already exists" report: renaming a file to a different case of
+// its own name (e.g. fixing "80s" wrongly title-cased to "80S") must
+// succeed, not be mistaken for colliding with an unrelated existing file —
+// macOS/Windows filesystems are case-insensitive by default, so the old
+// and new names name the same file.
+func TestApplyMultiRenameCaseOnlyRenameOfSelf(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteTestFile(t, filepath.Join(dir, "80s rock.mp3"), "content")
+
+	err := applyMultiRename(dir, []string{"80s rock.mp3"}, []string{"80S rock.mp3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read back the actual directory entry name rather than just opening
+	// "80S rock.mp3" by path — on a case-insensitive filesystem that alone
+	// wouldn't distinguish "really renamed" from "silently did nothing,
+	// but the case-insensitive lookup found the old name anyway."
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "80S rock.mp3" {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Fatalf("directory entries = %v, want exactly [80S rock.mp3]", names)
+	}
+}

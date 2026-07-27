@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -20,6 +21,18 @@ import (
 )
 
 var multiRenameCaseOptions = []string{"No Change", "UPPERCASE", "lowercase", "Title Case", "Sentence case"}
+
+// Persisted so the dialog reopens with whatever was last actually used
+// (Pattern/Case/Find/Replace/Regex), rather than resetting to "[N]"/"No
+// Change"/empty every time — saved on Rename (even if the attempt fails
+// validation) so a rejected batch's settings aren't lost either.
+const (
+	prefMultiRenamePattern = "multiRenamePattern"
+	prefMultiRenameCase    = "multiRenameCase"
+	prefMultiRenameFind    = "multiRenameFind"
+	prefMultiRenameReplace = "multiRenameReplace"
+	prefMultiRenameRegex   = "multiRenameRegex"
+)
 
 func multiRenameCaseMode(label string) rename.CaseMode {
 	switch label {
@@ -59,18 +72,22 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 		return
 	}
 	dir := view.CurrentPath()
+	prefs := c.app.Preferences()
 
 	patternEntry := widget.NewEntry()
-	patternEntry.SetText("[N]")
+	patternEntry.SetText(prefs.StringWithFallback(prefMultiRenamePattern, "[N]"))
 
 	caseSelect := widget.NewSelect(multiRenameCaseOptions, nil)
-	caseSelect.SetSelected("No Change")
+	caseSelect.SetSelected(prefs.StringWithFallback(prefMultiRenameCase, "No Change"))
 
 	findEntry := widget.NewEntry()
 	findEntry.SetPlaceHolder("Find (text or regex)")
+	findEntry.SetText(prefs.String(prefMultiRenameFind))
 	replaceEntry := widget.NewEntry()
 	replaceEntry.SetPlaceHolder("Replace with")
+	replaceEntry.SetText(prefs.String(prefMultiRenameReplace))
 	regexCheck := widget.NewCheck("Regex", nil)
+	regexCheck.SetChecked(prefs.Bool(prefMultiRenameRegex))
 
 	statusLbl := widget.NewLabel("")
 	previews := make([]string, len(names))
@@ -135,6 +152,12 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 		if !ok {
 			return
 		}
+		prefs.SetString(prefMultiRenamePattern, patternEntry.Text)
+		prefs.SetString(prefMultiRenameCase, caseSelect.Selected)
+		prefs.SetString(prefMultiRenameFind, findEntry.Text)
+		prefs.SetString(prefMultiRenameReplace, replaceEntry.Text)
+		prefs.SetBool(prefMultiRenameRegex, regexCheck.Checked)
+
 		out, err := rename.PreviewBatch(buildOpts(), names)
 		if err != nil {
 			dialog.ShowError(err, c.win)
@@ -142,11 +165,20 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 		}
 		if err := applyMultiRename(dir, names, out); err != nil {
 			dialog.ShowError(err, c.win)
+		} else {
+			// Selection is tracked by name, so a renamed file silently
+			// falls out of it while everything else stays selected — a
+			// confusing, arbitrary-looking leftover state rather than a
+			// deliberate one. Starting fresh after a successful rename
+			// avoids that; a rejected batch leaves the selection alone,
+			// since the user will likely want to retry with the same one.
+			view.DeselectAll()
 		}
 		view.Reload()
 	}, c.win)
 	d.Resize(multiRenameDialogSize(c.win))
 	d.Show()
+	c.win.Canvas().Focus(patternEntry)
 }
 
 // multiRenameDialogSize scales the dialog to the main window so the
@@ -172,9 +204,17 @@ func multiRenameDialogSize(win fyne.Window) fyne.Size {
 // shifting a whole sequence) can never clobber each other, without needing
 // a per-item conflict dialog for what's meant to be one bulk operation.
 func applyMultiRename(dir string, oldNames, newNames []string) error {
+	// Case-insensitive: macOS (APFS) and Windows (NTFS) both default to
+	// case-insensitive filesystems, so a rename that only changes case
+	// (e.g. fixing "80s" that got wrongly title-cased to "80S" — a real
+	// bug, since fixed, that produced exactly this) is really "this file,
+	// re-cased," not a collision with some other, unrelated file. Treating
+	// it as a byte-exact comparison instead would misreport a false
+	// "already exists" in that situation, and would miss a genuine
+	// same-batch collision between two names differing only by case.
 	oldSet := make(map[string]bool, len(oldNames))
 	for _, n := range oldNames {
-		oldSet[n] = true
+		oldSet[strings.ToLower(n)] = true
 	}
 
 	newSet := make(map[string]bool, len(newNames))
@@ -184,17 +224,18 @@ func applyMultiRename(dir string, oldNames, newNames []string) error {
 			continue
 		}
 		anyChanged = true
-		if newSet[newName] {
+		key := strings.ToLower(newName)
+		if newSet[key] {
 			return fmt.Errorf("%q would result from more than one renamed item", newName)
 		}
-		newSet[newName] = true
+		newSet[key] = true
 	}
 	if !anyChanged {
 		return nil
 	}
 
 	for _, newName := range newNames {
-		if oldSet[newName] {
+		if oldSet[strings.ToLower(newName)] {
 			continue // part of this batch — safe via the temp-name pass below
 		}
 		if _, err := os.Lstat(filepath.Join(dir, newName)); err == nil {

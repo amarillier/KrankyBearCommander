@@ -106,6 +106,20 @@ func TestPreviewCaseTitle(t *testing.T) {
 	}
 }
 
+// TestPreviewCaseTitleDigitsDontStartNewWord is a regression test for a
+// real false "already exists" report: a digit run (no word-boundary
+// character) must not leave the next letter treated as the start of a new
+// word, or "[80s ...]" wrongly title-cases to "[80S ...]".
+func TestPreviewCaseTitleDigitsDontStartNewWord(t *testing.T) {
+	got, err := Preview(Options{Pattern: "[N]", Case: CaseTitle}, "[80s Rock Cover].mp3", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "[80s Rock Cover].mp3" {
+		t.Fatalf("got %q, want %q", got, "[80s Rock Cover].mp3")
+	}
+}
+
 func TestPreviewCaseSentence(t *testing.T) {
 	got, err := Preview(Options{Pattern: "[N]", Case: CaseSentence}, "MY REPORT.docx", 1)
 	if err != nil {

@@ -115,6 +115,7 @@ func (c *commander) showSearch(p *pane) {
 	d = dialog.NewCustom("Search "+root, "Close", content, c.win)
 	d.Resize(fyne.NewSize(560, 420))
 	d.Show()
+	c.win.Canvas().Focus(patternEntry)
 }
 
 // matchesSearchPattern does a case-insensitive substring match for plain
