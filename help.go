@@ -80,9 +80,10 @@ VIEW MODES & SORTING:
 FUNCTION KEYS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 F1  Help                 This window.
-F2  Refresh               Re-reads the active pane's directory from disk —
-                          useful if something else changed it on disk while
-                          the tab sat open.
+F2  Refresh               Re-reads both panes' directories from disk and
+                          re-scans drives (Ctrl+R does the same) — useful
+                          if something else changed on disk while a tab
+                          sat open.
 F3  View                 Read-only viewer — text, or a hex dump for
                           anything that looks binary.
 F4  Edit                 Opens the built-in text editor, or your chosen
@@ -265,6 +266,10 @@ The 🔍 toolbar button (or File menu / F9 popup → Search…) recursively
 searches the active tab's directory by plain substring or a */? wildcard
 pattern. Picking a match from the results list opens its location in a new
 tab with the file selected as the cursor.
+Depth limits how many directory levels below the search root to descend
+into (Unlimited / Just this folder / 1-10 levels deep) — guards against an
+accidental search of somewhere huge (e.g. "/") running away; reopens with
+whatever you last chose.
 
 SMART FEATURES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -274,7 +279,8 @@ SMART FEATURES:
    Overwrite/Skip/Rename/Cancel conflict handling (with "apply to all").
 ✨ Theme Support: Light, Dark, or System theme (View menu) - matches your
    preference.
-✨ Tooltips on every button explain what it does.
+✨ Tooltips on every button explain what it does — and hovering any name in
+   Brief or Full view shows the full, untruncated text after a short delay.
 
 KEYBOARD SHORTCUTS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -284,7 +290,18 @@ KEYBOARD SHORTCUTS:
 • Ctrl+C / ⌘C - Copy (real files, to the OS clipboard). Ctrl+V / ⌘V - Paste.
 • Ctrl+M - Multi-Rename Tool. Literal Ctrl even on macOS (not ⌘), since
   ⌘M is already macOS's own Minimize Window shortcut below.
+• Ctrl+R - Refresh Both Panes, same as F2 or either pane's own ⟳ button —
+  all three always refresh both panes and drive bars, not just one.
+• Ctrl+F - Search (active pane).
+• Ctrl+Tab or Ctrl+O - Switch Active Pane, same as clicking into the other
+  one. Not plain Tab: Fyne itself intercepts that for cycling focus between
+  controls, before this app ever sees it. Ctrl+O is there as a fallback on
+  platforms where Ctrl+Tab is reserved for something else (e.g. cycling a
+  window's own native tabs on macOS).
 • Shift-click / Ctrl-click (⌘-click on macOS) - see SELECTING FILES above.
+• Escape - cancels/closes whichever dialog is open (F6/F7/F8, Search,
+  Multi-Rename Tool, and every other prompt), the same as its own
+  Cancel/No/Close button.
 • Enter - Open/navigate into the cursor row.
 • Cmd/Ctrl+Q - Quit
 • Cmd/Ctrl+W - Close window
@@ -304,6 +321,9 @@ KNOWN LIMITATIONS:
 • On macOS, F2 may be mapped to a hardware brightness key by default —
   either hold Fn, or enable "Use F1, F2, etc. as standard function keys"
   in System Settings → Keyboard, to use it for Refresh.
+• Escape-to-cancel (above) covers every dialog in the main window, but not
+  the separate built-in text editor window's own Unsaved Changes / Save As
+  prompts yet.
 
 MORE INFORMATION:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

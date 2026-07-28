@@ -29,7 +29,7 @@ func (c *commander) saveSevenZipPath(path string) {
 // (see fsops.SevenZipAvailable), and if neither finds one, "Compress to
 // .7z" simply doesn't appear in the context menu.
 func (c *commander) showSevenZipSettings() {
-	pathEntry := widget.NewEntry()
+	pathEntry := newDialogEntry()
 	pathEntry.SetText(c.sevenZipPath)
 	pathEntry.SetPlaceHolder("Leave blank to auto-detect 7z/7za/7zz on PATH")
 
@@ -48,7 +48,7 @@ func (c *commander) showSevenZipSettings() {
 				}
 			}
 		}
-		d.Show()
+		showDialog(d)
 	})
 
 	content := container.NewVBox(
@@ -62,7 +62,7 @@ func (c *commander) showSevenZipSettings() {
 		}
 		c.saveSevenZipPath(strings.TrimSpace(pathEntry.Text))
 	}, c.win)
-	d.Show()
+	showDialog(d)
 	c.win.Canvas().Focus(pathEntry)
 }
 

@@ -74,16 +74,16 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 	dir := view.CurrentPath()
 	prefs := c.app.Preferences()
 
-	patternEntry := widget.NewEntry()
+	patternEntry := newDialogEntry()
 	patternEntry.SetText(prefs.StringWithFallback(prefMultiRenamePattern, "[N]"))
 
 	caseSelect := widget.NewSelect(multiRenameCaseOptions, nil)
 	caseSelect.SetSelected(prefs.StringWithFallback(prefMultiRenameCase, "No Change"))
 
-	findEntry := widget.NewEntry()
+	findEntry := newDialogEntry()
 	findEntry.SetPlaceHolder("Find (text or regex)")
 	findEntry.SetText(prefs.String(prefMultiRenameFind))
-	replaceEntry := widget.NewEntry()
+	replaceEntry := newDialogEntry()
 	replaceEntry.SetPlaceHolder("Replace with")
 	replaceEntry.SetText(prefs.String(prefMultiRenameReplace))
 	regexCheck := widget.NewCheck("Regex", nil)
@@ -177,7 +177,7 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 		view.Reload()
 	}, c.win)
 	d.Resize(multiRenameDialogSize(c.win))
-	d.Show()
+	showDialog(d)
 	c.win.Canvas().Focus(patternEntry)
 }
 

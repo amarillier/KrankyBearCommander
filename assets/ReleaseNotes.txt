@@ -1,11 +1,110 @@
-Future ideas:
+Next phase v0.8.0:
 - Excel-style double-click a column boundary to auto-fit that column's width to its longest visible name - nice-to-have, not a hard need
 - user ability to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names (column widths themselves are now resizable — this is just about extra window width beyond the columns' own total going somewhere useful instead of blank space)
 - Connections manager to allow using keychain for credentials if needed, keys etc to connect via rsync (where available), sftp, scp, ../KrankyBearFileMover protocol so a remote share can open in a tab as if just another local directory or file system. Could end up more comprehensive with e.g. box, dropbox, Google Drive - maybe, but we don't necessarily want to do everything
+- TotalCmd feature find files and copy to listbox - temporary view showing files possibly in multiple locations, track full path to allow for file rename, move, copy operations, then press home button or navigate out back to normal non list box view
 
 Later phase someday maybe if practical - low priority now
+- TotalCmd launch apps toolbar - maybe, maybe never
 - drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
 
+Version 0.7.0 - July 28, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🐛 FIX Launching could unpredictably take 10-20+ seconds (vs. near-instant)
+   — both panes built a throwaway Home tab before your saved layout
+   replaced it, and that tab's Brief-view render (thrown away either way)
+   turned out to be the very first thing in the whole run to touch Fyne's
+   text-measurement machinery, unusually early (before the window even
+   exists). That default tab is no longer built at all when a saved layout
+   is about to replace it.
+✨ NEW If a tab's current directory (locked or not) has genuinely vanished
+   — most commonly an unmounted/disconnected drive — it now jumps back to
+   your home directory instead of getting stuck showing "no such file or
+   directory" indefinitely. A locked tab's lock itself is untouched: Home
+   (or reopening the tab) still returns to the original locked location if
+   the drive is reconnected later. Left alone for any other error
+   (permission denied, a real network timeout, ...), which you should
+   still see rather than get silently redirected past.
+🐛 FIX Search's auto-focus (0.6.0) didn't actually stick when opened via
+   the pane toolbar's 🔍 button, or F6/F7/F9 via their on-screen F-key bar
+   buttons rather than the keyboard shortcut or menu: those buttons clear
+   keyboard focus right after their action runs (so they don't swallow the
+   next F-key press) — which was undoing the dialog's own freshly-set
+   focus in the same stroke. Fixed by skipping that cleanup specifically
+   for the actions that deliberately leave something else focused.
+✨ NEW Escape now cancels/closes whichever dialog is on top — F6/F7/F8,
+   Search, Multi-Rename Tool, Create Symbolic Link, Compress's 7-Zip path,
+   Manage Editors/Favorites, Panel Colors, the color picker, the Copy/Move
+   name-conflict prompt, Calculate Folder Sizes' progress, and more —
+   instead of always needing an explicit Cancel/No/Close click. Each one
+   still does exactly what its own Cancel/Close button does (a real
+   Cancel for the conflict prompt and Folder Sizes, not just hiding the
+   dialog with the operation still silently running underneath).
+   Initially still didn't work for F6/F7/Search/Multi-Rename/Symlink/7-Zip
+   path/Manage Editors specifically — a genuine Fyne quirk: a focused
+   widget's own key handling always wins over the app's global key
+   dispatcher, and these are exactly the dialogs whose text field is
+   auto-focused on open (see above), so Escape was going straight to the
+   text field, which doesn't itself do anything with it. Fixed at the text
+   field itself, the same way this app already handled Escape-to-cancel
+   for inline rename. Not yet wired up for the separate built-in text
+   editor window's own dialogs (Unsaved Changes, Save As) — a smaller
+   follow-on if wanted.
+🐛 FIX Dragging the Search dialog's own results-list scrollbar (or any
+   other open dialog's scrollbar) could be misread as starting a file
+   drag-out on whatever pane happened to be underneath: the native
+   drag-out watcher runs at the whole native window level and had no idea
+   a dialog was covering that spot. Now skipped entirely whenever any
+   dialog/popup is open.
+✨ NEW Search has a Depth limit (Unlimited / Just this folder / 1-10 levels
+   deep) — guards against accidentally kicking off a search somewhere huge
+   (e.g. "/") without noticing and having to kill it. Actually prunes the
+   walk itself rather than just filtering results after the fact, so a
+   bounded search never descends into whatever's beyond the limit at all.
+   Remembers whatever you last chose, the same way Multi-Rename Tool
+   remembers its own settings.
+✨ NEW Hover over any name in Brief or Full view to see the full,
+   untruncated text after a short delay — the same tooltip mechanism every
+   toolbar button already uses, so it costs nothing extra to keep working.
+   No more needing to click (or shift into a rename) just to read a long
+   name past its column/cell width.
+🐛 FIX Multi-Rename Tool's Title Case mis-capitalized the first letter
+   right after an opening parenthesis (or bracket/quote) — e.g. "Forever
+   (chris Tomlin)" stayed "(chris" instead of "(Chris" — since that
+   character was itself consuming the "start of a new word" state before
+   it ever reached the letter it was meant for. Same family of bug as the
+   digit-adjacent-letter fix in 0.6.0, same underlying cause: only
+   space/underscore/hyphen/dot were treated as real word boundaries, and
+   anything else was wrongly treated as if it had already started a word.
+🐛 FIX Picking a Search result always jumped the destination tab to Brief
+   view, even if you were browsing in Full view — Search wasn't preserving
+   the tab's own view mode. Now inherits whichever view mode the tab
+   already had. Also now actually scrolls to bring the matched file into
+   view in either view mode, rather than only setting the cursor on a row
+   that might be scrolled off-screen.
+✨ NEW F2, Ctrl+R, and either pane's own ⟳ drive-bar button all now refresh
+   both panes and both drive bars at once, rather than just whichever one
+   you triggered it from — refreshing only one side was easy to misread as
+   "nothing changed" on the other, and refreshing both costs no noticeable
+   extra time.
+✨ NEW Ctrl+F opens Search for the active pane, alongside the existing
+   🔍 toolbar button / File menu / F9 popup entry points.
+✨ NEW Ctrl+Tab (or Ctrl+O) switches the active pane, same as clicking into
+   the other one (View menu / F9 popup → Switch Active Pane too). Not plain
+   Tab: Fyne's own driver intercepts that unconditionally for cycling focus
+   between controls before this app (or any app built on it) ever sees the
+   keypress, regardless of what — if anything — is currently focused.
+   Ctrl+Tab sidesteps that and matches the same "switch pane/tab"
+   convention browsers/IDEs already use — confirmed working on Windows, but
+   not on macOS, where Ctrl+Tab is plausibly reserved system-wide for
+   cycling a window's own native tabs instead, outside this app's control
+   either way. Ctrl+O ("Other pane") is bound to the same action as a
+   reliable alternative that doesn't depend on that.
+🐛 FIX Ejecting a drive could still briefly show it in the drive bar
+   afterward — diskutil/Shell.Application both hand off the actual unmount
+   rather than blocking until it's finished, so the immediate rescan could
+   run before the drive was really gone. A second rescan shortly after
+   catches up once it actually finishes.
 
 Version 0.6.0 - July 27, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

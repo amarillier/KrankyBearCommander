@@ -33,7 +33,12 @@ func (c *commander) doCalculateFolderSizes() {
 	cancelBtn := widget.NewButton("Cancel", func() { cancelled = true })
 	content := container.NewVBox(statusLbl, progressBar, cancelBtn)
 	prog := dialog.NewCustomWithoutButtons("Calculating Folder Sizes", content, c.win)
-	prog.Show()
+	// Escape sets the same flag the Cancel button does, rather than the
+	// generic showDialog(prog): clicking Cancel doesn't close this dialog
+	// immediately either (the background goroutine notices `cancelled` and
+	// hides it once its current step finishes) — Escape should match that,
+	// not be more abrupt than the button it's standing in for.
+	showDialogWithDismiss(prog, func() { cancelled = true })
 
 	go func() {
 		total := len(names) + 1 // +1 for the current directory's own total

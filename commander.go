@@ -61,8 +61,8 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.loadEditors()
 	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, c.openArchivedMember, c.ejectDrive)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, c.openArchivedMember, c.ejectDrive)
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5
@@ -109,6 +109,17 @@ func (c *commander) setActivePane(idx int) {
 	}
 	if v := c.right.activeView(); v != nil {
 		v.Refresh()
+	}
+}
+
+// toggleActivePane is Ctrl+Tab: switches which pane is active, the same as
+// clicking into the other one — see registerShortcuts for why Ctrl+Tab
+// rather than plain Tab.
+func (c *commander) toggleActivePane() {
+	if c.activePaneIndex == 0 {
+		c.setActivePane(1)
+	} else {
+		c.setActivePane(0)
 	}
 }
 

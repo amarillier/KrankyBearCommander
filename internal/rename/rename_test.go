@@ -120,6 +120,22 @@ func TestPreviewCaseTitleDigitsDontStartNewWord(t *testing.T) {
 	}
 }
 
+// TestPreviewCaseTitleParenDoesNotConsumeNewWord is a regression test for a
+// real reported bug: the first letter right after an opening parenthesis
+// stayed lowercase — "Forever (chris Tomlin)" title-cased to "(chris"
+// instead of "(Chris", because '(' itself was consuming the "start of a new
+// word" state before it ever reached the letter that state was meant for.
+func TestPreviewCaseTitleParenDoesNotConsumeNewWord(t *testing.T) {
+	got, err := Preview(Options{Pattern: "[N]", Case: CaseTitle}, "Forever (chris Tomlin) - Rockhestra Version.mp3", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Forever (Chris Tomlin) - Rockhestra Version.mp3"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestPreviewCaseSentence(t *testing.T) {
 	got, err := Preview(Options{Pattern: "[N]", Case: CaseSentence}, "MY REPORT.docx", 1)
 	if err != nil {

@@ -8,6 +8,7 @@ package main
 
 import (
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
@@ -80,6 +81,20 @@ func (c *commander) ejectDrive(root string) error {
 
 	c.left.rescanDriveBar()
 	c.right.rescanDriveBar()
+
+	// The OS's own eject call can return before the volume is actually
+	// gone from the mount table (diskutil/Shell.Application both hand off
+	// the unmount rather than blocking until it's fully done), so the
+	// immediate rescan above can still briefly show the just-ejected
+	// drive. One more rescan shortly after catches up once it's actually
+	// finished, without needing a real "is it gone yet" poll loop.
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		fyne.Do(func() {
+			c.left.rescanDriveBar()
+			c.right.rescanDriveBar()
+		})
+	}()
 	return nil
 }
 

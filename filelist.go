@@ -18,6 +18,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
+
 	"commander/internal/launch"
 	"commander/internal/panelstate"
 	"commander/internal/vfs"
@@ -58,11 +60,12 @@ type fileListView struct {
 	// a temp copy first, then opens that with the OS's default application.
 	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)
 
-	root       *fyne.Container // Build()'s return value; holds whichever view is active
-	table      *keyTable
-	header     [4]*widget.Button // Name / Ext / Size / Modified sort buttons
-	permHeader *widget.Label     // Permissions column has no sort field, so it's a plain label
-	headerRow  fyne.CanvasObject // built once; also sizes Brief view's header-height spacer, so switching views doesn't shift the grid
+	root        *fyne.Container // Build()'s return value; holds whichever view is active
+	table       *keyTable
+	header      [4]*widget.Button // Name / Ext / Size / Modified sort buttons
+	permHeader  *widget.Label     // Permissions column has no sort field, so it's a plain label
+	headerRow   fyne.CanvasObject // built once; also sizes Brief view's header-height spacer, so switching views doesn't shift the grid
+	briefScroll *container.Scroll // Brief view's own scroll container — rebuilt every render (buildBriefGrid), kept here so ScrollToCursor can reach it later
 
 	entries   []vfs.Entry // current directory's entries, sorted, excluding ".."
 	hasParent bool
@@ -271,6 +274,83 @@ func (v *fileListView) entryAt(row int) (vfs.Entry, bool) {
 	return v.entries[row], true
 }
 
+// rowIndexOf finds name's row index in the current listing.
+func (v *fileListView) rowIndexOf(name string) (int, bool) {
+	if name == "" {
+		return 0, false
+	}
+	for row := 0; row < v.rowCount(); row++ {
+		if e, ok := v.entryAt(row); ok && e.Name == name {
+			return row, true
+		}
+	}
+	return 0, false
+}
+
+// ScrollToCursor brings the cursor row into view in whichever mode is
+// currently active — used after Search jumps a tab straight to a match
+// (see search_ui.go), since setting Cursor alone positions the logical
+// cursor but doesn't itself scroll anything into view.
+func (v *fileListView) ScrollToCursor() {
+	row, ok := v.rowIndexOf(v.state.Cursor)
+	if !ok {
+		return
+	}
+	if v.state.ViewMode == panelstate.ViewBrief {
+		v.scrollBriefToRow(row)
+		return
+	}
+	if v.table != nil {
+		v.table.ScrollTo(widget.TableCellID{Row: row, Col: colName})
+	}
+}
+
+// currentBriefColumns is how many columns Brief view's grid is actually
+// showing right now: the user's fixed choice (2/3/4 — see
+// commander.setBriefColumns), or, in Auto mode, container.NewGridWrap's own
+// column count, which it computes internally from the available width and
+// doesn't expose — so this replicates that exact formula (see Fyne's
+// gridWrapLayout.Layout) from the Brief scroll's current width instead.
+func (v *fileListView) currentBriefColumns() int {
+	if v.briefColumns != nil {
+		if cols := v.briefColumns(); cols > 0 {
+			return cols
+		}
+	}
+	if v.briefScroll == nil {
+		return 1
+	}
+	const cellWidth = 180
+	width := v.briefScroll.Size().Width
+	if width <= cellWidth {
+		return 1
+	}
+	padding := theme.Padding()
+	cols := int((width + padding) / (cellWidth + padding))
+	if cols < 1 {
+		cols = 1
+	}
+	return cols
+}
+
+// scrollBriefToRow positions Brief view's scroll offset so row's cell is
+// roughly centered in the visible area, rather than just barely at the
+// top/bottom edge.
+func (v *fileListView) scrollBriefToRow(row int) {
+	if v.briefScroll == nil {
+		return
+	}
+	cols := v.currentBriefColumns()
+	gridRow := row / cols
+	padding := theme.Padding()
+	y := float32(gridRow) * (briefCellHeight + padding)
+	y -= v.briefScroll.Size().Height / 2
+	if y < 0 {
+		y = 0
+	}
+	v.briefScroll.ScrollToOffset(fyne.NewPos(0, y))
+}
+
 func (v *fileListView) orderedNames() []string {
 	names := make([]string, 0, len(v.entries)+1)
 	if v.hasParent {
@@ -455,7 +535,7 @@ func (v *fileListView) buildTable() *keyTable {
 		func() (int, int) { return v.rowCount(), tableColumnCount },
 		func() fyne.CanvasObject {
 			nameStack := container.NewStack(
-				canvas.NewText("", color.White),
+				newHoverName(canvas.NewText("", color.White)),
 				newRenameEntry(func(text string) { v.commitRename(text) }, v.cancelRename),
 			)
 			return container.NewStack(
@@ -512,7 +592,8 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 	// left edge is set (see its doc comment) — nameStack first, check second.
 	nameStack := border.Objects[0].(*fyne.Container)
 	check := border.Objects[1].(*widget.Check)
-	txt := nameStack.Objects[0].(*canvas.Text)
+	hn := nameStack.Objects[0].(*hoverName)
+	txt := hn.txt
 	renameField := nameStack.Objects[1].(*renameEntry)
 
 	cs := v.colors()
@@ -522,7 +603,7 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 	entry, ok := v.entryAt(id.Row)
 	if !ok {
 		txt.Text = ""
-		txt.Show()
+		hn.Show()
 		renameField.Hide()
 		check.Hidden = true
 		txt.Refresh()
@@ -555,11 +636,11 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 	// to its default visibility it would sit on top of, and blank out, the
 	// Ext/Size/Modified/Perm text underneath.
 	if renaming {
-		txt.Hide()
+		hn.Hide()
 		renameField.Show()
 	} else {
 		renameField.Hide()
-		txt.Show()
+		hn.Show()
 	}
 
 	txt.Color = v.rowColor(cs, entry)
@@ -628,6 +709,7 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 		}
 	}
 	if !renaming {
+		hn.SetToolTip(txt.Text) // full, untruncated text — set before truncating below
 		textSize := txt.TextSize
 		if textSize == 0 {
 			textSize = theme.TextSize()
@@ -827,7 +909,8 @@ func (v *fileListView) buildBriefGrid() fyne.CanvasObject {
 	} else {
 		grid = container.NewGridWrap(fyne.NewSize(180, 28), cells...)
 	}
-	return container.NewVScroll(grid)
+	v.briefScroll = container.NewVScroll(grid)
+	return v.briefScroll
 }
 
 // briefCellHeight is every Brief-view cell's fixed row height, in both Auto
@@ -928,6 +1011,7 @@ func (v *fileListView) buildBriefCell(entry vfs.Entry, cs ColorScheme) fyne.Canv
 	})
 	cell.fullText = name
 	cell.truncText = txt
+	cell.SetToolTip(name)
 	return cell
 }
 
@@ -1311,11 +1395,12 @@ func humanSize(n int64) string {
 // the Table view.
 type tappableCell struct {
 	widget.BaseWidget
-	content         fyne.CanvasObject
-	onTap           func(mod fyne.KeyModifier)
-	onDoubleTap     func()
-	onSecondaryTap  func(*fyne.PointEvent)
-	pendingModifier fyne.KeyModifier
+	ttwidget.ToolTipWidgetExtend // hover shows the full name — see buildBriefCell's SetToolTip call
+	content                      fyne.CanvasObject
+	onTap                        func(mod fyne.KeyModifier)
+	onDoubleTap                  func()
+	onSecondaryTap               func(*fyne.PointEvent)
+	pendingModifier              fyne.KeyModifier
 
 	// fullText/truncText, if set (buildBriefCell's name cells; left nil for
 	// the rename cell's Entry, which handles its own text), re-ellipsize on
@@ -1330,6 +1415,7 @@ type tappableCell struct {
 func newTappableCell(content fyne.CanvasObject, onTap func(fyne.KeyModifier), onDoubleTap func(), onSecondaryTap func(*fyne.PointEvent)) *tappableCell {
 	c := &tappableCell{content: content, onTap: onTap, onDoubleTap: onDoubleTap, onSecondaryTap: onSecondaryTap}
 	c.ExtendBaseWidget(c)
+	c.ExtendToolTipWidget(c)
 	return c
 }
 
@@ -1372,4 +1458,30 @@ func (c *tappableCell) TappedSecondary(e *fyne.PointEvent) {
 	if c.onSecondaryTap != nil {
 		c.onSecondaryTap(e)
 	}
+}
+
+// hoverName wraps one Full-view cell's canvas.Text with hover-tooltip
+// support (same ttwidget mechanism every toolbar button's tooltip already
+// uses — see tappableCell for Brief view's equivalent), so hovering a
+// truncated Name/Ext/Size/Modified/Perm cell shows its untruncated text.
+// widget.Table owns Tapped/TappedSecondary at the whole-table level (see
+// keyTable), never routing mouse events to individual cell content — but
+// hover (desktop.Hoverable) is resolved by the driver via a plain
+// position-based hit-test, entirely independent of that, so it reaches this
+// wrapper anyway despite Table's own click handling bypassing it.
+type hoverName struct {
+	widget.BaseWidget
+	ttwidget.ToolTipWidgetExtend
+	txt *canvas.Text
+}
+
+func newHoverName(txt *canvas.Text) *hoverName {
+	h := &hoverName{txt: txt}
+	h.ExtendBaseWidget(h)
+	h.ExtendToolTipWidget(h)
+	return h
+}
+
+func (h *hoverName) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(h.txt)
 }

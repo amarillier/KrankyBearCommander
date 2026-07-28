@@ -39,6 +39,7 @@ type pane struct {
 	onSearch             func()                                                            // Search button clicked; commander owns the search dialog (search_ui.go)
 	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)                   // Enter/double-click on a file inside an open archive; commander extracts + opens it (archive_browse_ui.go)
 	onEject              func(root string) error                                           // Eject clicked on a drive button; commander navigates both panes off it first (drivebutton_ui.go)
+	onRefreshAll         func()                                                            // this pane's own ⟳ drive-bar button clicked; commander refreshes both panes (see commander.doRefresh) rather than just this one
 
 	tabs   *container.DocTabs
 	views  []*fileListView
@@ -55,8 +56,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func()) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -93,7 +94,10 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 		if p.onSearch != nil {
 			p.onSearch()
 		}
-		unfocus()
+		// No unfocus() here, unlike every other button on this toolbar:
+		// showSearch deliberately focuses the Search dialog's text field so
+		// typing works immediately (see search_ui.go) — calling Unfocus()
+		// right after would immediately undo that.
 	})
 	searchBtn.SetToolTip("Search this tab's directory recursively by name or pattern")
 
@@ -301,13 +305,12 @@ func (p *pane) buildDriveBarContent() fyne.CanvasObject {
 
 	refreshBtn := ttwidget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
 		p.onActivated()
-		if v := p.activeView(); v != nil {
-			v.Reload()
+		if p.onRefreshAll != nil {
+			p.onRefreshAll()
 		}
-		p.rescanDriveBar()
 		unfocus()
 	})
-	refreshBtn.SetToolTip("Refresh this pane's current directory (F2) and re-scan for newly connected drives")
+	refreshBtn.SetToolTip("Refresh both panes (F2) and re-scan for newly connected drives")
 
 	items := []fyne.CanvasObject{homeBtn, upBtn, refreshBtn, widget.NewSeparator()}
 
@@ -403,13 +406,13 @@ func (p *pane) toggleLock() {
 		widget.NewLabel("Lock this tab to:\n"+state.Path),
 		allowNav,
 	)
-	dialog.NewCustomConfirm("Lock Tab", "Lock", "Cancel", content, func(ok bool) {
+	showDialog(dialog.NewCustomConfirm("Lock Tab", "Lock", "Cancel", content, func(ok bool) {
 		if !ok {
 			return
 		}
 		state.Lock(allowNav.Checked)
 		p.refreshChrome()
-	}, p.win).Show()
+	}, p.win))
 }
 
 // refreshChrome syncs the active tab's title and the lock button/status line

@@ -205,7 +205,7 @@ func (c *commander) compressSelection(view *fileListView, ext, sevenZipBin strin
 // a single keystroke, same convention as F7 MkDir's prefill.
 func (c *commander) createSymlink(view *fileListView, sourcePath string, other *pane) {
 	defaultPath := fsops.SymlinkName(view.CurrentPath(), filepath.Base(sourcePath))
-	nameEntry := widget.NewEntry()
+	nameEntry := newDialogEntry()
 	nameEntry.SetText(defaultPath)
 	content := container.NewVBox(widget.NewLabel("Create symbolic link at:"), nameEntry)
 	d := dialog.NewCustomConfirm("Create Symbolic Link", "Create", "Cancel", content, func(ok bool) {
@@ -222,13 +222,13 @@ func (c *commander) createSymlink(view *fileListView, sourcePath string, other *
 		}
 	}, c.win)
 	d.Resize(fyne.NewSize(560, 160))
-	d.Show()
+	showDialog(d)
 	c.win.Canvas().Focus(nameEntry)
 	nameEntry.TypedShortcut(&fyne.ShortcutSelectAll{})
 }
 
 func (c *commander) trashEntry(view *fileListView, path string) {
-	dialog.NewConfirm("Move to Trash", fmt.Sprintf("Send %q to the trash?", filepath.Base(path)), func(ok bool) {
+	showDialog(dialog.NewConfirm("Move to Trash", fmt.Sprintf("Send %q to the trash?", filepath.Base(path)), func(ok bool) {
 		if !ok {
 			return
 		}
@@ -241,7 +241,7 @@ func (c *commander) trashEntry(view *fileListView, path string) {
 				view.Reload()
 			})
 		}()
-	}, c.win).Show()
+	}, c.win))
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

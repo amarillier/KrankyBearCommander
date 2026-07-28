@@ -52,6 +52,15 @@ func (c *commander) fkeyActions() map[fyne.KeyName]func() {
 // regardless of whether it arrived via the canvas-level SetOnTypedKey
 // fallback (nothing focused) or keyTable's onOtherKey (a table row focused).
 func (c *commander) dispatchKey(ev *fyne.KeyEvent) {
+	// Checked first, before the "skip while typing" guard below: a dialog's
+	// auto-focused text entry (Search, F6/F7, ...) IS a *widget.Entry, so
+	// Escape needs to reach dismissTopDialog before that guard would
+	// otherwise swallow it. dismissTopDialog itself is a no-op (returns
+	// false) when no dialog is open, so plain Escape elsewhere is unaffected.
+	if ev.Name == fyne.KeyEscape && dismissTopDialog() {
+		return
+	}
+
 	action, ok := c.fkeyActions()[ev.Name]
 	if !ok {
 		return
@@ -105,6 +114,34 @@ func (c *commander) registerShortcuts() {
 	// Cmd/Ctrl+M in the Help window) — same reasoning as Ctrl+U above.
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyM, Modifier: desktop.ControlModifier},
 		func(fyne.Shortcut) { c.showMultiRenameTool() })
+
+	// Refresh Both Panes and Search — literal Ctrl even on macOS, same
+	// reasoning as Ctrl+U/Ctrl+M above (Cmd+R/Cmd+F aren't reserved by
+	// macOS itself, but literal Ctrl keeps every custom shortcut in this
+	// app on one consistent, collision-free modifier).
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyR, Modifier: desktop.ControlModifier},
+		func(fyne.Shortcut) { c.doRefresh() })
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyF, Modifier: desktop.ControlModifier},
+		func(fyne.Shortcut) { c.showSearch(c.activePane()) })
+
+	// Switch Active Pane: plain Tab isn't usable for this — Fyne's glfw
+	// driver intercepts it before it ever reaches a shortcut, TypedKey, or
+	// dispatchKey at all, unconditionally calling its own FocusNext()/
+	// FocusPrevious() cycling instead (see capturesTab in window.go),
+	// unless the currently-focused widget specifically opts out via the
+	// rare fyne.Tabbable interface — true of essentially none of this
+	// app's widgets. Ctrl+Tab sidesteps that (a real modifier, so neither
+	// this nor the triggersShortcut bug applies) and matches the same
+	// convention browsers/IDEs use for "switch pane/tab" — confirmed
+	// working on Windows, but not on macOS, where Ctrl+Tab (and
+	// Ctrl+Shift+Tab) is plausibly reserved system-wide for cycling a
+	// window's own native tabs, intercepted before Fyne's event loop ever
+	// sees it — outside this app's control either way. Ctrl+O ("Other
+	// pane") is bound to the same action as a reliable alternative that
+	// doesn't depend on that.
+	toggleActivePane := func(fyne.Shortcut) { c.toggleActivePane() }
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyTab, Modifier: desktop.ControlModifier}, toggleActivePane)
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyO, Modifier: desktop.ControlModifier}, toggleActivePane)
 }
 
 // keyBarButton builds one function-key bar button with a tooltip explaining
@@ -123,14 +160,18 @@ func keyBarButton(canvas fyne.Canvas, label, tip string, action func()) *ttwidge
 	return b
 }
 
-// menuKeyBarButton is keyBarButton's counterpart for F9 specifically: its
-// action shows a popup menu that Fyne has already focused for us by the
-// time ShowAtPosition returns (proven by the fact keyboard-triggered F9
-// already closes cleanly with Escape), so unfocusing afterward — right for
-// every other F-key button, which don't leave an interactive overlay
-// behind — would immediately undo that and strand the popup neither
-// focused (Escape/F9 do nothing) nor closed (still needs a second click).
-func menuKeyBarButton(label, tip string, action func()) *ttwidget.Button {
+// keyBarButtonKeepFocus is keyBarButton's counterpart for actions that leave
+// something specific focused on purpose, which the trailing Unfocus() would
+// otherwise immediately undo:
+//   - F9's popup menu, which Fyne has already focused for us by the time
+//     ShowAtPosition returns (proven by the fact keyboard-triggered F9
+//     already closes cleanly with Escape) — unfocusing after would strand it
+//     neither focused (Escape/F9 do nothing) nor closed (needs a second
+//     click).
+//   - F6/F7, which focus their dialog's text field so typing works
+//     immediately (see fileops_ui.go) — same reasoning as the Search
+//     toolbar button (paneview.go), which has the same exception.
+func keyBarButtonKeepFocus(label, tip string, action func()) *ttwidget.Button {
 	b := ttwidget.NewButton(label, action)
 	b.SetToolTip(tip)
 	return b
@@ -142,15 +183,15 @@ func (c *commander) buildFunctionKeyBar() fyne.CanvasObject {
 	canvas := c.win.Canvas()
 	return container.NewGridWithColumns(11,
 		keyBarButton(canvas, "F1 Help", "Open the Help window", func() { showHelp(c.app) }),
-		keyBarButton(canvas, "F2 Refresh", "Re-read the active pane's directory from disk", c.doRefresh),
+		keyBarButton(canvas, "F2 Refresh", "Re-read both panes' directories from disk and re-scan drives", c.doRefresh),
 		keyBarButton(canvas, "F3 View", "View the selected file (read-only)", c.doView),
 		keyBarButton(canvas, "F4 Edit", "Edit the selected file in the built-in text editor", c.doEdit),
 		keyBarButton(canvas, "F5 Copy", "Copy the selection to the other pane's directory", c.doCopy),
-		keyBarButton(canvas, "F6 Ren/Move", "Move the selection to the other pane, or rename a single item", c.doMoveOrRename),
-		keyBarButton(canvas, "F7 MkDir", "Create a new folder in the active pane", c.doMkdir),
+		keyBarButtonKeepFocus("F6 Ren/Move", "Move the selection to the other pane, or rename a single item", c.doMoveOrRename),
+		keyBarButtonKeepFocus("F7 MkDir", "Create a new folder in the active pane", c.doMkdir),
 		keyBarButton(canvas, "F8 Delete", "Send the selection to the trash", c.doDeleteTrash),
 		keyBarButton(canvas, "⇧F8 Del!", "Permanently delete the selection — bypasses the trash, cannot be undone", c.doDeletePermanent),
-		menuKeyBarButton("F9 Menu", "Open the popup menu (new tab, view mode, panel colors, help)", c.doOpenMenu),
+		keyBarButtonKeepFocus("F9 Menu", "Open the popup menu (new tab, view mode, panel colors, help)", c.doOpenMenu),
 		keyBarButton(canvas, "F10 Quit", "Quit "+appName, func() { fyne.Do(func() { quitApp(c.app, c.win) }) }),
 	)
 }
@@ -189,10 +230,11 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Brief View", func() { c.activePane().setViewMode(panelstate.ViewBrief) }),
 		fyne.NewMenuItem("Full View", func() { c.activePane().setViewMode(panelstate.ViewExpanded) }),
 		briefColumnsItem,
-		fyne.NewMenuItem("Refresh (F2)", func() { c.doRefresh() }),
+		fyne.NewMenuItem("Refresh Both Panes (F2 / Ctrl+R)", func() { c.doRefresh() }),
+		fyne.NewMenuItem("Switch Active Pane (Ctrl+Tab / Ctrl+O)", func() { c.toggleActivePane() }),
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { c.swapPanes() }),
 		fyne.NewMenuItem("Calculate Folder Sizes", func() { c.doCalculateFolderSizes() }),
-		fyne.NewMenuItem("Search…", func() { c.showSearch(c.activePane()) }),
+		fyne.NewMenuItem("Search… (Ctrl+F)", func() { c.showSearch(c.activePane()) }),
 		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { c.doCopyToClipboard() }),
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { c.doPaste() }),
 		fyne.NewMenuItem("Multi-Rename Tool… (Ctrl+M)", func() { c.showMultiRenameTool() }),

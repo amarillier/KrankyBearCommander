@@ -45,17 +45,19 @@ func (c *commander) blockIfArchive(view *fileListView) bool {
 
 // ── F2 Refresh ───────────────────────────────────────────────────────────────
 
-// doRefresh re-reads the active pane's current directory from disk — the
-// only way to force this short of navigating away and back, e.g. after an
-// external process has changed the directory's contents while the tab sat
-// open (see Reload's ScrollToTop doc comment for the stale-listing artifact
-// this also guards against).
+// doRefresh re-reads both panes' active tabs from disk and re-scans both
+// drive bars — F2, Ctrl+R, and every pane's own ⟳ drive-bar button all
+// trigger this same "refresh everything" action rather than just whichever
+// pane you happened to be in: a partial refresh was confusingly easy to
+// misread as "nothing changed" on the other side, and refreshing both costs
+// no noticeable time either way.
 func (c *commander) doRefresh() {
-	p := c.activePane()
-	if v := p.activeView(); v != nil {
-		v.Reload()
+	for _, p := range []*pane{c.left, c.right} {
+		if v := p.activeView(); v != nil {
+			v.Reload()
+		}
+		p.rescanDriveBar()
 	}
-	p.rescanDriveBar()
 }
 
 // ── F5 Copy ──────────────────────────────────────────────────────────────────
@@ -77,21 +79,21 @@ func (c *commander) doCopy() {
 	// Browsing inside an archive: F5 extracts instead of copying — there's
 	// nothing real at these paths for fsops.Copy's os.* calls to find.
 	if zfs, ok := view.fs.(*zipfs.FS); ok {
-		dialog.NewConfirm("Extract", fmt.Sprintf("Extract %d item(s) to:\n%s", len(paths), target), func(ok bool) {
+		showDialog(dialog.NewConfirm("Extract", fmt.Sprintf("Extract %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 			if !ok {
 				return
 			}
 			c.runFileOp("Extracting", paths, target, zfs.Extract, src)
-		}, c.win).Show()
+		}, c.win))
 		return
 	}
 
-	dialog.NewConfirm("Copy", fmt.Sprintf("Copy %d item(s) to:\n%s", len(paths), target), func(ok bool) {
+	showDialog(dialog.NewConfirm("Copy", fmt.Sprintf("Copy %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 		if !ok {
 			return
 		}
 		c.runFileOp("Copying", paths, target, fsops.Copy, src)
-	}, c.win).Show()
+	}, c.win))
 }
 
 // ── F6 Move / Rename ─────────────────────────────────────────────────────────
@@ -118,7 +120,7 @@ func (c *commander) doMoveOrRename() {
 
 	if len(paths) == 1 {
 		oldPath := paths[0]
-		nameEntry := widget.NewEntry()
+		nameEntry := newDialogEntry()
 		nameEntry.SetText(filepath.Join(dst.Path, filepath.Base(oldPath)))
 		content := container.NewVBox(widget.NewLabel("Rename/Move to:"), nameEntry)
 		d := dialog.NewCustomConfirm("Rename / Move", "OK", "Cancel", content, func(ok bool) {
@@ -128,18 +130,18 @@ func (c *commander) doMoveOrRename() {
 			c.performRename(oldPath, nameEntry.Text, src)
 		}, c.win)
 		d.Resize(fyne.NewSize(560, 160))
-		d.Show()
+		showDialog(d)
 		c.win.Canvas().Focus(nameEntry)
 		return
 	}
 
 	target := dst.Path
-	dialog.NewConfirm("Move", fmt.Sprintf("Move %d item(s) to:\n%s", len(paths), target), func(ok bool) {
+	showDialog(dialog.NewConfirm("Move", fmt.Sprintf("Move %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 		if !ok {
 			return
 		}
 		c.runFileOp("Moving", paths, target, fsops.Move, src)
-	}, c.win).Show()
+	}, c.win))
 }
 
 func (c *commander) performRename(oldPath, newPath string, sourcePane *pane) {
@@ -165,7 +167,7 @@ func (c *commander) doMkdir() {
 	if state == nil {
 		return
 	}
-	nameEntry := widget.NewEntry()
+	nameEntry := newDialogEntry()
 	nameEntry.SetPlaceHolder("New folder name")
 	// Prefill with the cursor row's name (classic commander muscle memory:
 	// F7 right after landing on/near a similarly-named item) so the user can
@@ -186,7 +188,7 @@ func (c *commander) doMkdir() {
 		p.activeView().Reload()
 	}, c.win)
 	d.Resize(fyne.NewSize(560, 160))
-	d.Show()
+	showDialog(d)
 	// Focus + select the prefilled name so it's ready to type over
 	// immediately — no click-to-focus needed first, matching every other
 	// typing modal — Entry's select-all shortcut only takes effect once the
@@ -217,7 +219,7 @@ func (c *commander) doDelete(permanent bool) {
 		title = "Delete Permanently"
 		msg = fmt.Sprintf("PERMANENTLY delete %d item(s)? This cannot be undone.", len(paths))
 	}
-	dialog.NewConfirm(title, msg, func(ok bool) {
+	showDialog(dialog.NewConfirm(title, msg, func(ok bool) {
 		if !ok {
 			return
 		}
@@ -230,7 +232,7 @@ func (c *commander) doDelete(permanent bool) {
 				p.activeView().Reload()
 			})
 		}()
-	}, c.win).Show()
+	}, c.win))
 }
 
 // ── shared progress + conflict machinery ────────────────────────────────────
@@ -299,7 +301,7 @@ func showConflictDialog(win fyne.Window, destPath string, resultCh chan<- confli
 	ext := filepath.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
 
-	nameEntry := widget.NewEntry()
+	nameEntry := newDialogEntry()
 	nameEntry.SetText(stem + " (copy)" + ext)
 	applyAll := widget.NewCheck("Apply to all remaining conflicts", nil)
 
@@ -323,7 +325,13 @@ func showConflictDialog(win fyne.Window, destPath string, resultCh chan<- confli
 		buttons,
 	)
 	d = dialog.NewCustomWithoutButtons("File Exists", content, win)
-	d.Show()
+	// Escape reaches send() directly (same as the Cancel button) rather than
+	// the generic d.Dismiss(): this dialog reports its result through
+	// resultCh, not the dialog framework's own ok/cancel callback (it has
+	// none — NewCustomWithoutButtons takes no callback), so a plain Dismiss
+	// would just hide the dialog while resolve() stays blocked on resultCh
+	// forever.
+	showDialogWithDismiss(d, func() { send(fsops.ConflictCancel, "") })
 	win.Canvas().Focus(nameEntry)
 }
 

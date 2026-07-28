@@ -166,7 +166,7 @@ func (c *commander) showManageFavorites() {
 
 	d := dialog.NewCustom("Manage Favorites", "Close", container.NewVScroll(list), c.win)
 	d.Resize(fyne.NewSize(480, 400))
-	d.Show()
+	showDialog(d)
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

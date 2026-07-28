@@ -22,12 +22,14 @@ fixing and performance work.
   Modified / Permissions columns (click a header to sort, click again to
   reverse; drag the boundary after a header to resize — applies everywhere
   and persists). Both views ellipsize names too long for their column/cell
-  instead of overflowing into whatever's next to them. Directories (and
+  instead of overflowing into whatever's next to them, and show the full
+  name in a tooltip on hover. Directories (and
   `..`) get their own configurable text color, distinct from files.
 - **Classic F-key row**: F1 Help, F2 Refresh, F3 View, F4 Edit, F5 Copy, F6
   Move/Rename, F7 MkDir, F8 Delete (to trash), Shift+F8 delete permanently,
   F9 menu, F10 Quit — both as on-screen buttons and real keyboard shortcuts,
-  with tooltips on every button.
+  with tooltips on every button. Escape cancels/closes whichever dialog is
+  open, anywhere in the app, same as its own Cancel/No/Close button.
 - **Selecting files**: checkboxes, Shift-click range-select, Ctrl/Cmd-click
   toggle, and Select All/Deselect All (Ctrl+A / Ctrl+Shift+A, or the ☑
   toolbar button). Click an already-selected row's name again (slower than
@@ -67,9 +69,12 @@ fixing and performance work.
   copying, F3 previews a file (or lets you pick one to preview without fully
   browsing in), and mutating operations refuse cleanly since archives are
   read-only.
-- **Recursive search** (🔍 toolbar button) by name or `*`/`?` wildcard
-  pattern within the active tab's directory; picking a match opens its
-  location in a new tab with the file selected.
+- **Recursive search** (🔍 toolbar button, or Ctrl+F) by name or `*`/`?`
+  wildcard pattern within the active tab's directory, with a selectable
+  Depth limit (Unlimited / Just this folder / 1-10 levels deep) so an
+  accidental search of somewhere huge doesn't run away; picking a match
+  opens its location in a new tab, in the same view mode you were already
+  using, with the file selected and scrolled into view.
 - **Built-in viewer and editor** (F3/F4) — text or a hex dump for binary
   files, and a simple text editor with Save/Save As. F4 can also launch any
   number of **external editors** you configure (name + command); pick the
@@ -80,6 +85,16 @@ fixing and performance work.
   common folders (Desktop, Downloads, and Applications on macOS).
 - **Swap Panes** (Ctrl+U or the popup menu) — exchange the left and right
   panes' entire tab contents at once.
+- **Switch Active Pane** (Ctrl+Tab, Ctrl+O, or the popup menu) — same as
+  clicking into the other pane. Plain Tab isn't used for this: Fyne reserves
+  it for cycling focus between controls before an app ever sees the
+  keypress; Ctrl+O is there as a reliable alternative on platforms where
+  Ctrl+Tab is reserved for something else (e.g. cycling a window's own
+  native tabs on macOS).
+- **Refresh** (F2, Ctrl+R, or either pane's own ⟳ drive-bar button) — always
+  refreshes both panes and both drive bars at once, not just whichever one
+  you triggered it from, so it's never ambiguous whether "nothing changed"
+  really means nothing changed.
 - **Show Hidden Files** toggle (View menu / F9 popup) — persists across
   launches.
 - **Status bar** showing the cursor item's name, size/modified time (or item

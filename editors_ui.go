@@ -74,9 +74,9 @@ func (c *commander) buildEditorsSubmenu() *fyne.Menu {
 func (c *commander) showManageEditors() {
 	list := container.NewVBox()
 
-	nameEntry := widget.NewEntry()
+	nameEntry := newDialogEntry()
 	nameEntry.SetPlaceHolder("Name (e.g. VS Code)")
-	cmdEntry := widget.NewEntry()
+	cmdEntry := newDialogEntry()
 	cmdEntry.SetPlaceHolder("Command (e.g. code, or /usr/local/bin/subl)")
 
 	var refresh func()
@@ -125,7 +125,7 @@ func (c *commander) showManageEditors() {
 
 	d := dialog.NewCustom("Manage Editors", "Close", content, c.win)
 	d.Resize(fyne.NewSize(480, 480))
-	d.Show()
+	showDialog(d)
 	c.win.Canvas().Focus(nameEntry)
 }
 

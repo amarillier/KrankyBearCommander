@@ -180,19 +180,25 @@ func toTitleCase(s string) string {
 			newWord = true
 			continue
 		}
-		// newWord must be cleared here — not just inside the "is a
-		// letter" case below — otherwise a digit run (e.g. "80s") never
-		// consumes it, so the letter right after gets wrongly treated as
-		// the start of a new word ("80s" -> "80S"): found the hard way,
-		// via a real false "already exists" report where the mis-cased
-		// result collided (case-insensitively) with the file it came
-		// from.
 		if newWord && unicode.IsLetter(r) {
 			b.WriteRune(unicode.ToUpper(r))
 		} else {
 			b.WriteRune(unicode.ToLower(r))
 		}
-		newWord = false
+		// Only letters and digits ever actually "start" a word. Digits
+		// still consume newWord (so the letter right after a digit run,
+		// e.g. "80s", isn't wrongly treated as the start of a NEW word —
+		// found the hard way, via a real false "already exists" report
+		// where the mis-cased "80S" collided, case-insensitively, with the
+		// file it came from) — but other punctuation (parens, brackets,
+		// quotes, ...) must NOT consume it, or the first letter right after
+		// an opening one is wrongly treated as mid-word instead of the
+		// start of its own: "Forever (chris Tomlin)" stayed "(chris" rather
+		// than "(Chris" before this, since '(' itself was clearing newWord
+		// before ever reaching the letter it was meant to capitalize.
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			newWord = false
+		}
 	}
 	return b.String()
 }

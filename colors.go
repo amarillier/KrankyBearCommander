@@ -108,7 +108,7 @@ func showColorSchemeSettings(a fyne.App, win fyne.Window, onChange func(ColorSch
 			}, win)
 			picker.Advanced = true
 			picker.SetColor(get(cs))
-			picker.Show()
+			showDialog(picker)
 		}
 		return btn
 	}
@@ -136,7 +136,7 @@ func showColorSchemeSettings(a fyne.App, win fyne.Window, onChange func(ColorSch
 	)
 
 	d := dialog.NewCustom("Panel Colors", "Close", container.NewPadded(content), win)
-	d.Show()
+	showDialog(d)
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

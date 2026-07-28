@@ -41,7 +41,19 @@ func (c *commander) installDragOut() {
 // it started on the vertical scrollbar — found the hard way: dragging the
 // scrollbar thumb was being misread as a file drag, since the row list's
 // own bounding box includes the scrollbar strip along its right edge.
+//
+// Also nil whenever any dialog/popup menu is open (found the same way, via
+// the Search dialog's own results-list scrollbar): the native drag-out
+// monitor (dragout_darwin.go's NSEvent monitor, dragout_windows.go's window
+// subclass) watches the whole native window at the OS level, unaware that a
+// Fyne dialog is a same-window overlay covering part of it — so without
+// this check, a drag that starts on/over a dialog sitting on top of a pane
+// still hit-tests against whatever pane is underneath.
 func (c *commander) dragoutHitTest(pos fyne.Position) []string {
+	if c.win.Canvas().Overlays().Top() != nil {
+		return nil
+	}
+
 	p := c.paneAt(pos)
 	view := p.activeView()
 	if view == nil {
