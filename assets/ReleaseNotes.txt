@@ -1,8 +1,11 @@
+Version 0.8.0 - July 28, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Next phase v0.8.0:
 - Excel-style double-click a column boundary to auto-fit that column's width to its longest visible name - nice-to-have, not a hard need
 - user ability to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names (column widths themselves are now resizable — this is just about extra window width beyond the columns' own total going somewhere useful instead of blank space)
-- Connections manager to allow using keychain for credentials if needed, keys etc to connect via rsync (where available), sftp, scp, ../KrankyBearFileMover protocol so a remote share can open in a tab as if just another local directory or file system. Could end up more comprehensive with e.g. box, dropbox, Google Drive - maybe, but we don't necessarily want to do everything
 - TotalCmd feature find files and copy to listbox - temporary view showing files possibly in multiple locations, track full path to allow for file rename, move, copy operations, then press home button or navigate out back to normal non list box view
+- Connections manager to allow using keychain for credentials if needed, keys etc to connect via rsync (where available), sftp, scp, ../KrankyBearFileMover protocol so a remote share can open in a tab as if just another local directory or file system. Could end up more comprehensive with e.g. box, dropbox, Google Drive - maybe, but we don't necessarily want to do everything
 
 Later phase someday maybe if practical - low priority now
 - TotalCmd launch apps toolbar - maybe, maybe never
