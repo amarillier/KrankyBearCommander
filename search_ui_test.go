@@ -85,6 +85,45 @@ func TestSearchWalkHiddenExcludedByDefault(t *testing.T) {
 	}
 }
 
+func TestListboxNamesKeepsPlainNamesWhenUnique(t *testing.T) {
+	root := t.TempDir()
+	matches := []searchMatch{
+		{path: filepath.Join(root, "a.txt"), name: "a.txt"},
+		{path: filepath.Join(root, "sub", "b.txt"), name: "b.txt"},
+	}
+	names := listboxNames(root, matches)
+	if len(names) != 2 {
+		t.Fatalf("got %d names, want 2: %+v", len(names), names)
+	}
+	if names["a.txt"] != matches[0].path || names["b.txt"] != matches[1].path {
+		t.Fatalf("names = %+v, want plain basenames mapped to their real paths", names)
+	}
+}
+
+func TestListboxNamesDisambiguatesCollidingBasenames(t *testing.T) {
+	root := t.TempDir()
+	p1 := filepath.Join(root, "one", "readme.txt")
+	p2 := filepath.Join(root, "two", "readme.txt")
+	matches := []searchMatch{
+		{path: p1, name: "readme.txt"},
+		{path: p2, name: "readme.txt"},
+	}
+	names := listboxNames(root, matches)
+	if len(names) != 2 {
+		t.Fatalf("got %d names, want 2 distinct entries for two different real files: %+v", len(names), names)
+	}
+	seen := map[string]bool{}
+	for _, real := range names {
+		if real != p1 && real != p2 {
+			t.Fatalf("unexpected real path %q in %+v", real, names)
+		}
+		seen[real] = true
+	}
+	if len(seen) != 2 {
+		t.Fatalf("both real files should be reachable under distinct names, got %+v", names)
+	}
+}
+
 func TestSearchDepthValueMapping(t *testing.T) {
 	cases := map[string]int{
 		"Unlimited":        -1,

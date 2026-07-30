@@ -1,10 +1,12 @@
 // search_ui.go — recursive filename/pattern search within the active tab's
 // current directory (File menu / F9 popup / pane toolbar 🔍 button).
-// Results are a plain clickable list rather than a live-browsable results
-// tab like Total Commander's — clicking a match opens its containing
-// directory in a new tab in the same pane, with the match as the cursor
-// row, which covers the same "search, then jump straight to it" workflow
-// with far less new UI machinery.
+// Clicking a match opens its containing directory in a new tab in the same
+// pane, with the match as the cursor row — "search, then jump straight to
+// it." Feed to Listbox instead swaps the active tab (in place) to a flat
+// view of every current match, however many different subfolders they came
+// from — TotalCmd's own "copy to listbox" from Find Files, minus the extra
+// UI of a separate pseudo-drive: see fileListView.enterListbox and
+// internal/vfs/listboxfs.
 package main
 
 import (
@@ -19,6 +21,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"commander/internal/panelstate"
+	"commander/internal/vfs/listboxfs"
 	"commander/internal/vfs/zipfs"
 )
 
@@ -70,6 +73,13 @@ func (c *commander) showSearch(p *pane) {
 			c.showStatus("search isn't available inside archives")
 			return
 		}
+		// state.Path is a synthetic label here, not a real walkable
+		// directory — searchWalk would just silently find nothing rather
+		// than error, which reads as "no matches" instead of "wrong mode".
+		if _, insideListbox := view.fs.(*listboxfs.FS); insideListbox {
+			c.showStatus("search isn't available in a listbox view — press Home first")
+			return
+		}
 	}
 	root := state.Path
 
@@ -116,6 +126,10 @@ func (c *commander) showSearch(p *pane) {
 
 	statusLbl := widget.NewLabel("")
 
+	feedBtn := widget.NewButton("Feed to Listbox", nil)
+	feedBtn.Disable()
+	var lastPattern string
+
 	runSearch := func() {
 		pattern := strings.TrimSpace(patternEntry.Text)
 		if pattern == "" {
@@ -123,17 +137,44 @@ func (c *commander) showSearch(p *pane) {
 		}
 		maxDepth := searchDepthValue(depthSelect.Selected)
 		matches = searchWalk(root, pattern, maxDepth, c.showHiddenFiles)
+		lastPattern = pattern
 		statusLbl.SetText(fmt.Sprintf("%d match(es)", len(matches)))
 		resultsList.Refresh()
+		if len(matches) > 0 {
+			feedBtn.Enable()
+		} else {
+			feedBtn.Disable()
+		}
 	}
 	patternEntry.OnSubmitted = func(string) { runSearch() }
 	searchBtn := widget.NewButton("Search", runSearch)
+
+	feedBtn.OnTapped = func() {
+		if len(matches) == 0 {
+			return
+		}
+		view := p.activeView()
+		if view == nil {
+			return
+		}
+		// No "/"/"\" in this label — paneview.go's tabLabel derives a tab's
+		// title from whatever's after its Path's LAST path separator, so
+		// embedding the (separator-containing) search root here would leave
+		// the tab titled with just that root's own last component, silently
+		// indistinguishable from an ordinary directory tab.
+		listboxRoot := fmt.Sprintf("Listbox: %s", lastPattern)
+		if !view.enterListbox(listboxRoot, listboxNames(root, matches)) {
+			c.showStatus("tab is locked")
+			return
+		}
+		d.Hide()
+	}
 
 	content := container.NewBorder(
 		container.NewVBox(
 			container.NewBorder(nil, nil, nil, searchBtn, patternEntry),
 			container.NewHBox(widget.NewLabel("Depth:"), depthSelect),
-			statusLbl,
+			container.NewBorder(nil, nil, nil, feedBtn, statusLbl),
 		),
 		nil, nil, nil,
 		container.NewVScroll(resultsList),
@@ -143,6 +184,38 @@ func (c *commander) showSearch(p *pane) {
 	d.Resize(fyne.NewSize(560, 420))
 	showDialog(d)
 	c.win.Canvas().Focus(patternEntry)
+}
+
+// listboxNames assigns each match a display name for listboxfs (fed to
+// fileListView.enterListbox above): the plain filename normally, but
+// disambiguated with its path relative to root for any name that collides
+// with another match — a flat listbox can otherwise easily gather two
+// different files that happen to share a name from two different
+// subfolders, and every existing selection/rename code path in this app
+// expects a tab's entry names to be unique the way a real directory's
+// always are. The rare case of even that still colliding falls back to the
+// full path, which can't.
+func listboxNames(root string, matches []searchMatch) map[string]string {
+	counts := make(map[string]int, len(matches))
+	for _, m := range matches {
+		counts[m.name]++
+	}
+	names := make(map[string]string, len(matches))
+	for _, m := range matches {
+		name := m.name
+		if counts[name] > 1 {
+			if rel, err := filepath.Rel(root, m.path); err == nil {
+				name = rel
+			} else {
+				name = m.path
+			}
+		}
+		if _, exists := names[name]; exists {
+			name = m.path
+		}
+		names[name] = m.path
+	}
+	return names
 }
 
 // matchesSearchPattern does a case-insensitive substring match for plain

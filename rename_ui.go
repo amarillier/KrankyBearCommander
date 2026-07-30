@@ -15,7 +15,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
 
-	"commander/internal/fsops"
 	"commander/internal/vfs"
 	"commander/internal/vfs/zipfs"
 )
@@ -96,9 +95,21 @@ func (v *fileListView) commitRename(text string) {
 		return
 	}
 
+	// newPath is built against oldPath's OWN directory (v.fs.Dir(oldPath)),
+	// not v.state.Path directly — identical for every real directory (they're
+	// the same thing there), but for a listbox view (see enterListbox)
+	// v.state.Path is a synthetic label while oldPath is already the entry's
+	// real absolute path, and its real directory is the only thing that's
+	// actually valid to build a sibling path against.
 	oldPath := v.fs.Join(v.state.Path, r.name)
-	newPath := v.fs.Join(v.state.Path, newName)
-	if err := fsops.Rename(oldPath, newPath); err != nil {
+	newPath := v.fs.Join(v.fs.Dir(oldPath), newName)
+	// v.fs.Rename, not fsops.Rename — inline rename never crosses
+	// filesystems (newPath is always built from oldPath's own directory
+	// above), so this is always a same-backend rename; v.fs.Rename resolves
+	// correctly for both a real local path (localfs.Rename is exactly
+	// os.Rename anyway) and a remote connection's presented path, which
+	// fsops.Rename's raw os.Rename never could.
+	if err := v.fs.Rename(oldPath, newPath); err != nil {
 		if v.onStatus != nil {
 			v.onStatus("cannot rename: " + err.Error())
 		}

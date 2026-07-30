@@ -21,6 +21,7 @@ import (
 	"commander/internal/launch"
 	"commander/internal/panelstate"
 	"commander/internal/vfs"
+	"commander/internal/vfs/listboxfs"
 	"commander/internal/vfs/zipfs"
 )
 
@@ -59,7 +60,7 @@ func (c *commander) showRowContextMenu(p *pane, view *fileListView, name string,
 	)
 
 	compressItem := fyne.NewMenuItem("Compress", nil)
-	compressItem.ChildMenu = fyne.NewMenu("", c.compressMenuItems(view)...)
+	compressItem.ChildMenu = fyne.NewMenu("", c.compressMenuItems(view, c.inactivePaneOf(p))...)
 	items = append(items,
 		compressItem,
 		fyne.NewMenuItem("Multi-Rename Tool…", func() { c.showMultiRenameToolFor(view) }),
@@ -166,36 +167,71 @@ func (c *commander) duplicateEntry(view *fileListView, path string) {
 // Compress acts on the pane's full selection via SelectionOrCursor — the
 // same "selection if any, else cursor" rule F5/F6/F8 already use — since
 // compressing a multi-selection into one archive is the whole point.
-func (c *commander) compressMenuItems(view *fileListView) []*fyne.MenuItem {
+func (c *commander) compressMenuItems(view *fileListView, other *pane) []*fyne.MenuItem {
 	items := []*fyne.MenuItem{
-		fyne.NewMenuItem("To .zip", func() { c.compressSelection(view, "zip", "") }),
+		fyne.NewMenuItem("To .zip", func() { c.compressSelection(view, "zip", "", other) }),
 	}
 	if bin, ok := fsops.SevenZipAvailable(c.sevenZipPath); ok {
-		items = append(items, fyne.NewMenuItem("To .7z", func() { c.compressSelection(view, "7z", bin) }))
+		items = append(items, fyne.NewMenuItem("To .7z", func() { c.compressSelection(view, "7z", bin, other) }))
 	}
 	return items
 }
 
-func (c *commander) compressSelection(view *fileListView, ext, sevenZipBin string) {
+// compressSelection defaults to "alongside the source, no prompt" — fast,
+// and right nearly always where you'd want it — except from a listbox view
+// (see listboxfs), which has no real "alongside" for its entries to share:
+// there, it prompts for an explicit destination instead of just refusing,
+// defaulting to other (the opposite pane)'s current directory, the same
+// cross-pane convention F5/F6 already use.
+func (c *commander) compressSelection(view *fileListView, ext, sevenZipBin string, other *pane) {
+	if c.blockIfRemote(view) {
+		return
+	}
 	paths := view.SelectionOrCursor()
 	if len(paths) == 0 {
 		return
 	}
-	dest := fsops.CompressName(view.CurrentPath(), paths, ext)
-	go func() {
-		var err error
-		if ext == "7z" {
-			err = fsops.CompressSevenZip(sevenZipBin, paths, dest)
-		} else {
-			err = fsops.Compress(paths, dest)
-		}
-		fyne.Do(func() {
-			if err != nil {
-				dialog.ShowError(err, c.win)
+	runCompress := func(dest string) {
+		go func() {
+			var err error
+			if ext == "7z" {
+				err = fsops.CompressSevenZip(sevenZipBin, paths, dest)
+			} else {
+				err = fsops.Compress(paths, dest)
 			}
-			view.Reload()
-		})
-	}()
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(err, c.win)
+				}
+				view.Reload()
+			})
+		}()
+	}
+
+	if _, ok := view.fs.(*listboxfs.FS); ok {
+		destDir := ""
+		if other != nil {
+			if st := other.activeState(); st != nil {
+				destDir = st.Path
+			}
+		}
+		nameEntry := newDialogEntry()
+		nameEntry.SetText(fsops.CompressName(destDir, paths, ext))
+		content := container.NewVBox(widget.NewLabel("Compress to:"), nameEntry)
+		d := dialog.NewCustomConfirm("Compress", "Compress", "Cancel", content, func(ok bool) {
+			if !ok || strings.TrimSpace(nameEntry.Text) == "" {
+				return
+			}
+			runCompress(nameEntry.Text)
+		}, c.win)
+		d.Resize(fyne.NewSize(560, 160))
+		showDialog(d)
+		c.win.Canvas().Focus(nameEntry)
+		nameEntry.TypedShortcut(&fyne.ShortcutSelectAll{})
+		return
+	}
+
+	runCompress(fsops.CompressName(view.CurrentPath(), paths, ext))
 }
 
 // createSymlink prompts for where to create a link to sourcePath, defaulting
@@ -204,6 +240,9 @@ func (c *commander) compressSelection(view *fileListView, ext, sevenZipBin strin
 // at, unlike Copy/Move). The default name is pre-selected so retyping it is
 // a single keystroke, same convention as F7 MkDir's prefill.
 func (c *commander) createSymlink(view *fileListView, sourcePath string, other *pane) {
+	if c.blockIfListbox(view) || c.blockIfRemote(view) {
+		return
+	}
 	defaultPath := fsops.SymlinkName(view.CurrentPath(), filepath.Base(sourcePath))
 	nameEntry := newDialogEntry()
 	nameEntry.SetText(defaultPath)

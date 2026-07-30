@@ -21,6 +21,13 @@ func (c *commander) copyToClipboard(view *fileListView) {
 	if view == nil || c.blockIfArchive(view) {
 		return
 	}
+	// The OS clipboard only ever holds real local file references — a
+	// remote connection's presented paths aren't files Finder/Explorer
+	// could actually paste.
+	if _, ok := view.fs.(remoteConnFS); ok {
+		c.showStatus("copying a remote file to the OS clipboard isn't supported yet — use F5 Copy to download it first")
+		return
+	}
 	paths := view.SelectionOrCursor()
 	if len(paths) == 0 {
 		c.showStatus("nothing to copy")
@@ -45,7 +52,7 @@ func (c *commander) doCopyToClipboard() {
 // pastes into whichever pane/tab was right-clicked, not necessarily the
 // active one.
 func (c *commander) pasteInto(p *pane, view *fileListView) {
-	if view == nil || c.blockIfArchive(view) {
+	if view == nil || c.blockIfArchive(view) || c.blockIfListbox(view) {
 		return
 	}
 	paths, err := osclipboard.PasteFiles()
@@ -57,7 +64,15 @@ func (c *commander) pasteInto(p *pane, view *fileListView) {
 		c.showStatus("clipboard has no files to paste")
 		return
 	}
-	c.runFileOp("Pasting", paths, view.CurrentPath(), fsops.Copy, p)
+	// The OS clipboard only ever holds real local file references, so the
+	// source side here is always real — only the destination might be a
+	// remote connection, needing Upload instead of fsops.Copy's raw os.*
+	// calls.
+	op := fsOpFunc(fsops.Copy)
+	if remoteFS, ok := view.fs.(remoteConnFS); ok {
+		op = remoteFS.Upload
+	}
+	c.runFileOp("Pasting", paths, view.CurrentPath(), op, p)
 }
 
 // doPaste is Ctrl/Cmd+V: pastes into the active pane's current directory.

@@ -44,6 +44,17 @@ type State struct {
 
 	Selected map[string]bool // selected entry names within Path
 	Cursor   string          // name of the cursor row within Path
+
+	// TabTitle, if set, overrides Path's own last-component-derived tab
+	// title (see paneview.go's tabLabel) — used for a remote connection tab
+	// (connections_ui.go), so it's titled with the connection's own
+	// friendly name (e.g. "solaris114lab2") rather than "user@host:port",
+	// which is what Path's last component degrades to once you've
+	// navigated to the connection's own top with nothing deeper to show.
+	// Cleared once the tab navigates back to local browsing (see
+	// fileListView.adjustFSForTarget) so it doesn't linger past the
+	// connection it described.
+	TabTitle string
 }
 
 // New returns a fresh, unlocked tab state rooted at path.

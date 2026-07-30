@@ -90,6 +90,16 @@ func (c *commander) addFavorite(p *pane) {
 	if state == nil {
 		return
 	}
+	// A listbox view's Path is a synthetic label, not a real, later
+	// re-navigable directory — bookmarking it would produce a Favorite that
+	// fails (or, worse, silently resolves to nothing useful) the moment
+	// it's actually clicked. A remote connection's presented path IS real
+	// and re-navigable, but Favorites has no notion yet of "which saved
+	// connection to reconnect through first" — deferred alongside the other
+	// blockIfRemote-guarded operations.
+	if c.blockIfListbox(p.activeView()) || c.blockIfRemote(p.activeView()) {
+		return
+	}
 	label := lastPathComponent(state.Path)
 	if label == "" {
 		label = state.Path

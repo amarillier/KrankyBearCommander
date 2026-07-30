@@ -1,15 +1,120 @@
-Next phase v0.8.0:
-- Excel-style double-click a column boundary to auto-fit that column's width to its longest visible name - nice-to-have, not a hard need
-- user ability to expand panes to fit a window if the user stretches the window to make more space to better fit longer file and directory names (column widths themselves are now resizable — this is just about extra window width beyond the columns' own total going somewhere useful instead of blank space)
-- TotalCmd feature beyond find files, copy to listbox - temporary view showing files in a single pane possibly originally in multiple locations, track full path to allow for file rename, move, copy operations, then press home button or navigate out back to normal non list box view
-- Connections manager to allow using keychain for credentials if needed, keys etc to connect via rsync (where available), sftp, scp, ../KrankyBearFileMover protocol so a remote share can open in a tab as if just another local directory or file system. Could end up more comprehensive with e.g. box, dropbox, Google Drive - maybe, but we don't necessarily want to do everything
+Next phase v0.9.0:
+- Connections manager: F4 Edit, Compress, Create Symbolic Link, Multi-Rename Tool, Add to Favorites, and multi-item cross-connection Move against a connection tab - all currently just refuse cleanly for SFTP/SMB/FileAgent alike, each would need its own dedicated remote-aware plumbing. Box/Dropbox/Google Drive still just "maybe" - not committing to doing everything.
 
 Later phase someday maybe if practical - low priority now
-- TotalCmd launch apps toolbar - maybe, maybe never
-- drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+- TotalCmd launch apps toolbar - drag apps onto a config, launch them from Commander; used something like this a lot years ago, then found a free Windows Executor tool, hotkey-activated. Still like the idea, but since ../KrankyBearExecutor already covers hotkey-based launches, this would only be a nice-to-have convenience, not a real need - maybe, maybe never, and far lower value than Connections manager
+- drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-kused of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
 
-Version 0.8.0 - July 28, 2026
+Version 0.8.0 - July 30, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Double-click a Full view column boundary (Name/Ext/Size/Modified) to
+   auto-fit that column to its widest current entry, Excel-style, instead of
+   only being able to drag it. Fits the actual listing, not just whatever's
+   scrolled into view — same underlying entries either way. A plain
+   (non-double) click on the boundary still does nothing but show the
+   resize cursor, same as before.
+✨ NEW Full view's Name column now claims any pane width left over once
+   every column's own set width is accounted for, instead of leaving it as
+   dead space to the right of Perm — stretching a window (or dragging the
+   pane divider) wider now goes toward reading longer file/directory names
+   without needing a manual column drag every time. Per-pane, since the two
+   panes can already be different widths; the other columns keep exactly
+   the width you set them to either way.
+✨ NEW Search's results dialog has a "Feed to Listbox" button (TotalCmd's
+   own Find Files feature, minus the separate pseudo-drive) — switches the
+   active tab to a flat view of every current match, however many different
+   subfolders they came from, tracking each one's real location so
+   rename/move/copy/delete still work exactly as if you'd navigated to it
+   directly. No ".." row (there's no single real parent to a view that can
+   span many folders) — press Home to go back to a normal directory view.
+   New Folder, Paste, drag-in, Create Symbolic Link, Add to Favorites, and
+   Multi-Rename Tool all refuse with a clear message while a listbox view
+   is active, rather than doing something wrong with the nonexistent
+   "current directory" they'd otherwise assume — none of them make sense
+   (or, for Multi-Rename, are worth the added complexity) against a view
+   that isn't really one real directory. Compress is the one exception:
+   since it only ever needs a single explicit destination anyway, it now
+   prompts for one (defaulting to the opposite pane's directory) instead of
+   refusing — also handy from a normal folder if you'd rather choose where
+   the archive goes than always get it dropped alongside the source.
+🐛 FIX Clicking into a pane's tab below its last row (or elsewhere in empty
+   table space) didn't actually make that pane active the way clicking an
+   actual row does — an F-key right after could silently act on whichever
+   pane really was still active instead, with no visible sign anything was
+   wrong. Existed before the listbox view above; that's just what surfaced
+   it, since a listbox pane's now-clearer "this needs a real directory"
+   messages made the mismatch obvious for the first time.
+✨ NEW Connections manager (File menu / F9 popup → "Connections…") — save
+   named SFTP connections (host, port, username, password or an SSH key +
+   optional passphrase, a starting remote path) and open one in a brand
+   new tab that browses, renames, moves, creates folders in, and deletes
+   from the remote server exactly like a local directory. "Connect"
+   downloads/uploads/deletes for real; there's no separate "sync" step.
+   Password/passphrase are stored in the OS keychain (macOS Keychain,
+   Windows Credential Manager, Linux Secret Service), never in the plain
+   connections.json alongside the rest of the connection's details.
+   Host keys use standard SSH trust-on-first-use: the very first connect
+   (and any time the key genuinely changes since — worded more alarmingly,
+   since that specific case can mean a real man-in-the-middle) asks you to
+   confirm the fingerprint before proceeding, the same as any SSH/SCP
+   client. F5 Copy downloads/uploads accordingly depending on which side
+   is remote (copying directly between two different remote connections
+   isn't supported yet — copy to local first); F3 View downloads to a temp
+   file first, same as viewing a file already inside an open archive. No
+   ".." past the remote's own true root, and Home is the only way back out
+   to local browsing, since a connection's paths aren't really "inside"
+   anything local. F4 Edit, Compress, Create Symbolic Link, Multi-Rename
+   Tool, Add to Favorites, and moving multiple items to/from a connection
+   in one batch (single-item Rename/Move within the same connection does
+   work) all refuse with a clear message rather than doing something wrong
+   against a connection they're not wired up for yet. Each pane also has
+   its own 🖥 toolbar button (next to 🔍 Search) that opens Connections and
+   connects straight into that pane specifically, rather than only via
+   File menu/F9 (which always target whichever pane is currently active).
+   "Add Connection…" and "Edit" (connections can now be edited in place,
+   not just removed-and-re-added) are their own dialog rather than an
+   always-visible form, and the saved-connections list now actually shows
+   more than one row at a time — both were the same underlying issue: a
+   plain vertical stack never hands a scrollable list any of a dialog's
+   leftover height, so the list was left with almost none once an 8-field
+   form sat below it. Connecting now also closes the Connections dialog
+   once the new tab is actually open, rather than leaving you looking at
+   an unchanged dialog with no obvious sign anything happened.
+🐛 FIX An SSH key path pointing at the PUBLIC key (e.g. an existing
+   `ssh -i ~/.ssh/id_rsa.pub ...` alias) failed to connect ("parse SSH key:
+   ssh: no key found") — OpenSSH's own client accepts that because it uses
+   the .pub file only to identify which key pair to offer, then loads the
+   real private key from the same path minus ".pub"; Go's ssh library has
+   no such convenience built in, so it's replicated here. Point the SSH Key
+   Path field at either file now, same as the command line already did.
+✨ NEW SMB shares alongside SFTP in the Connections manager (Protocol
+   selector in Add/Edit) — the same live-browsable tab, same F5/F6/F7/F8/F3
+   support, same OS-keychain-backed password (SMB has no separate key-based
+   auth, just username/password and an optional NTLM Domain for a
+   workgroup/domain account). Remote Path doubles as the share name for SMB
+   — e.g. "Users" or "Users/allan" — since a share has to be mounted before
+   anything within it is reachable at all; no host-key-style trust step,
+   since NTLM auth has no equivalent identity primitive to verify against.
+✨ NEW A connection's tab is titled with its own saved Name (e.g.
+   "solaris114lab2") instead of degrading to "user@host:port" once you're
+   at the connection's own top with no deeper directory name to show —
+   reverts to normal path-derived titling once the tab navigates back to
+   local browsing (Home), so the friendly name never lingers past the
+   connection it described.
+✨ NEW Click a saved connection's name (in Connections) to highlight it —
+   purely a "yes, this is the one I mean" visual confirmation before using
+   its Connect/Edit/Remove buttons, no effect of its own.
+✨ NEW ../KrankyBearFileMover's own "FileAgent" protocol as a third
+   connectable backend alongside SFTP and SMB, completing this pass on the
+   Connections manager — a Commander tab can now connect straight to a
+   FileMover instance running as `-file-agent` on another machine (or a
+   real FileMover app on that machine, not requiring Commander there too),
+   with the same F5/F6/F7/F8/F3 support the other two protocols already
+   have. No username at all — the protocol authenticates with a pre-shared
+   key alone. No host-key-style trust step either, unlike SFTP: the TLS
+   certificate pin is entered directly (copied from wherever the listener
+   printed it on startup), expected to already be known before the first
+   connect rather than discovered/confirmed during it.
 
 Version 0.7.0 - July 28, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

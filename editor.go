@@ -26,7 +26,7 @@ import (
 // detached with the file path as its last argument.
 func (c *commander) doEdit() {
 	view := c.activePane().activeView()
-	if c.blockIfArchive(view) {
+	if c.blockIfArchive(view) || c.blockIfRemote(view) {
 		return
 	}
 	paths := view.SelectionOrCursor()

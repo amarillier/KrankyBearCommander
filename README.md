@@ -75,6 +75,18 @@ fixing and performance work.
   accidental search of somewhere huge doesn't run away; picking a match
   opens its location in a new tab, in the same view mode you were already
   using, with the file selected and scrolled into view.
+- **Connections manager** (File menu / F9 popup, or the 🖥 button next to 🔍
+  on each pane) — save named SFTP, SMB, or FileAgent connections and open one
+  in a new tab that browses, renames, moves, creates folders in, and deletes
+  from the remote server exactly like a local directory. Passwords/
+  passphrases/pre-shared keys live in the OS keychain, never in the saved
+  connection details on disk; SFTP host keys use standard SSH
+  trust-on-first-use. FileAgent connects straight to a
+  [KrankyBearFileMover](https://github.com/amarillier/KrankyBearFileMover)
+  instance running as -file-agent on another machine, authenticating with a
+  pre-shared key and a TLS certificate pin instead of a username. Host/Port
+  aren't limited to the standard ports, so a firewall-forwarded port works
+  too, the same as an ssh -p alias would.
 - **Built-in viewer and editor** (F3/F4) — text or a hex dump for binary
   files, and a simple text editor with Save/Save As. F4 can also launch any
   number of **external editors** you configure (name + command); pick the

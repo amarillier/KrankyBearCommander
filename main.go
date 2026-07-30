@@ -123,6 +123,7 @@ func quitApp(a fyne.App, win fyne.Window) {
 
 func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	editorsItem := fyne.NewMenuItem("Manage Editors…", func() { cmdr.showManageEditors() })
+	connectionsItem := fyne.NewMenuItem("Connections…", func() { cmdr.showConnections(cmdr.activePane()) })
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
 		fyne.NewMenuItem("Search… (active pane) (Ctrl+F)", func() { cmdr.showSearch(cmdr.activePane()) }),
@@ -131,6 +132,7 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { cmdr.doPaste() }),
 		fyne.NewMenuItemSeparator(),
 		editorsItem,
+		connectionsItem,
 		fyne.NewMenuItem("7-Zip Binary Path…", func() { cmdr.showSevenZipSettings() }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", func() { fyne.Do(func() { quitApp(a, win) }) }),

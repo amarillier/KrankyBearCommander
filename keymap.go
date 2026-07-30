@@ -245,6 +245,7 @@ func (c *commander) doOpenMenu() {
 			showColorSchemeSettings(c.app, c.win, c.applyColorScheme)
 		}),
 		editorsItem,
+		fyne.NewMenuItem("Connections…", func() { c.showConnections(c.activePane()) }),
 		fyne.NewMenuItem("7-Zip Binary Path…", func() { c.showSevenZipSettings() }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Help", func() { showHelp(c.app) }),

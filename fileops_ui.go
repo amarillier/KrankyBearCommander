@@ -16,8 +16,24 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"commander/internal/fsops"
+	"commander/internal/vfs"
+	"commander/internal/vfs/listboxfs"
 	"commander/internal/vfs/zipfs"
 )
+
+// remoteConnFS marks a vfs.FileSystem backed by a live remote network
+// connection (SFTP, SMB — internal/vfs/sftpfs, internal/vfs/smbfs) as
+// opposed to an open archive or a listbox view, which also satisfy
+// swappableFS (filelist.go) but get their own, differently-worded blocks.
+// blockIfRemote and the Download/Upload-style transfer routing below use
+// this instead of a type-switch per backend, so adding a third connection
+// type later needs no changes here at all.
+type remoteConnFS interface {
+	vfs.FileSystem
+	swappableFS
+	Download(sources []string, destDir string, progress fsops.ProgressFunc, resolve fsops.ConflictFunc) error
+	Upload(sources []string, destDir string, progress fsops.ProgressFunc, resolve fsops.ConflictFunc) error
+}
 
 func (c *commander) inactivePaneOf(p *pane) *pane {
 	if p == c.left {
@@ -38,6 +54,47 @@ func (c *commander) inactivePaneOf(p *pane) *pane {
 func (c *commander) blockIfArchive(view *fileListView) bool {
 	if _, ok := view.fs.(*zipfs.FS); ok {
 		dialog.ShowInformation("Read-Only Archive", "This archive is read-only — extract with F5 to make changes.", c.win)
+		return true
+	}
+	return false
+}
+
+// blockIfListbox reports (and refuses) any operation that would need to
+// create new content "in the current directory" without ever prompting for
+// one — F7 MkDir, Paste, drag-in, Add Current Directory to Favorites, Create
+// Symbolic Link — plus Multi-Rename Tool, whose same-batch-collision
+// temp-rename pass assumes one shared real directory for everything in the
+// batch. Unlike an archive, a listbox view's existing entries (rename/move/
+// copy/delete of something already listed) work completely normally — see
+// fileListView.enterListbox — since each one already resolves to its own
+// real path; it's only "current directory" itself that's a synthetic label
+// with nothing real behind it. Compress isn't blocked here despite also
+// wanting a real destination — see compressSelection, which prompts for one
+// instead, since (unlike these) it only ever needs a single explicit path.
+func (c *commander) blockIfListbox(view *fileListView) bool {
+	if _, ok := view.fs.(*listboxfs.FS); ok {
+		dialog.ShowInformation("Listbox View", "This is a temporary search-results view, not a real directory — press Home first.", c.win)
+		return true
+	}
+	return false
+}
+
+// blockIfRemote reports (and refuses) operations not wired up yet for a
+// remote connection (SFTP, SMB) — F4 Edit, Compress, Create Symbolic Link,
+// Multi-Rename Tool, Add to Favorites. Unlike blockIfListbox, this ISN'T
+// because there's no real "current directory" (a connection has a
+// perfectly real one — see F7 MkDir/Paste/drag-in, which DO work against
+// one). Each of these would need its own dedicated remote-aware plumbing
+// (F4: download, watch for external edits, re-upload on save; Compress:
+// download everything first, then zip; Create Symbolic Link: SFTP's own
+// SYMLINK op (SMB has no real equivalent), not fsops.Symlink's os.Symlink;
+// Multi-Rename: see blockIfRemoteMove's reasoning for why a batch op is a
+// bigger lift than a single one; Add to Favorites: the Favorites system has
+// no notion of "which saved connection to reconnect through" yet) that
+// isn't done in this first pass.
+func (c *commander) blockIfRemote(view *fileListView) bool {
+	if _, ok := view.fs.(remoteConnFS); ok {
+		dialog.ShowInformation("Not Supported Yet", "This isn't supported yet for a remote connection.", c.win)
 		return true
 	}
 	return false
@@ -70,10 +127,12 @@ func (c *commander) doCopy() {
 		c.showStatus("nothing to copy")
 		return
 	}
-	dst := c.inactivePaneOf(src).activeState()
+	dstPane := c.inactivePaneOf(src)
+	dst := dstPane.activeState()
 	if dst == nil {
 		return
 	}
+	dstView := dstPane.activeView()
 	target := dst.Path
 
 	// Browsing inside an archive: F5 extracts instead of copying — there's
@@ -88,11 +147,30 @@ func (c *commander) doCopy() {
 		return
 	}
 
-	showDialog(dialog.NewConfirm("Copy", fmt.Sprintf("Copy %d item(s) to:\n%s", len(paths), target), func(ok bool) {
+	// A remote connection's presented paths aren't real local paths either
+	// — route through its own Download/Upload instead of fsops.Copy's raw
+	// os.* calls, exactly like the archive case above. Remote-to-different-
+	// remote isn't supported yet (Download assumes a real local
+	// destination, Upload a real local source) — copy to local first.
+	srcSF, srcRemote := view.fs.(remoteConnFS)
+	dstSF, dstRemote := dstView.fs.(remoteConnFS)
+	if srcRemote && dstRemote {
+		c.showStatus("copying directly between two remote connections isn't supported yet — copy to local first")
+		return
+	}
+	verb, op := "Copy", fsOpFunc(fsops.Copy)
+	switch {
+	case srcRemote:
+		verb, op = "Download", srcSF.Download
+	case dstRemote:
+		verb, op = "Upload", dstSF.Upload
+	}
+
+	showDialog(dialog.NewConfirm(verb, fmt.Sprintf("Copy %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 		if !ok {
 			return
 		}
-		c.runFileOp("Copying", paths, target, fsops.Copy, src)
+		c.runFileOp(verb+"ing", paths, target, op, src)
 	}, c.win))
 }
 
@@ -105,29 +183,32 @@ func (c *commander) doCopy() {
 
 func (c *commander) doMoveOrRename() {
 	src := c.activePane()
-	if c.blockIfArchive(src.activeView()) {
+	view := src.activeView()
+	if c.blockIfArchive(view) {
 		return
 	}
-	paths := src.activeView().SelectionOrCursor()
+	paths := view.SelectionOrCursor()
 	if len(paths) == 0 {
 		c.showStatus("nothing to move")
 		return
 	}
-	dst := c.inactivePaneOf(src).activeState()
+	dstPane := c.inactivePaneOf(src)
+	dst := dstPane.activeState()
 	if dst == nil {
 		return
 	}
+	dstView := dstPane.activeView()
 
 	if len(paths) == 1 {
 		oldPath := paths[0]
 		nameEntry := newDialogEntry()
-		nameEntry.SetText(filepath.Join(dst.Path, filepath.Base(oldPath)))
+		nameEntry.SetText(dstView.fs.Join(dst.Path, filepath.Base(oldPath)))
 		content := container.NewVBox(widget.NewLabel("Rename/Move to:"), nameEntry)
 		d := dialog.NewCustomConfirm("Rename / Move", "OK", "Cancel", content, func(ok bool) {
 			if !ok || strings.TrimSpace(nameEntry.Text) == "" {
 				return
 			}
-			c.performRename(oldPath, nameEntry.Text, src)
+			c.performRename(view, oldPath, nameEntry.Text, src)
 		}, c.win)
 		d.Resize(fyne.NewSize(560, 160))
 		showDialog(d)
@@ -135,6 +216,15 @@ func (c *commander) doMoveOrRename() {
 		return
 	}
 
+	// Multi-item Move always targets the opposite pane's directory as one
+	// batch — decomposing that into the right mix of native rename /
+	// Download+Upload+delete for a remote connection, with its own
+	// progress/conflict handling, isn't done yet. F5 Copy already covers
+	// copying to/from a connection; the single-item dialog above (via
+	// performRename) covers a same-connection rename natively.
+	if c.blockIfRemoteMove(view, dstView) {
+		return
+	}
 	target := dst.Path
 	showDialog(dialog.NewConfirm("Move", fmt.Sprintf("Move %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 		if !ok {
@@ -144,7 +234,46 @@ func (c *commander) doMoveOrRename() {
 	}, c.win))
 }
 
-func (c *commander) performRename(oldPath, newPath string, sourcePane *pane) {
+// blockIfRemoteMove reports (and refuses) an F6 Move whenever either side
+// is a remote connection — see doMoveOrRename's doc comment above for what
+// IS supported instead.
+func (c *commander) blockIfRemoteMove(src, dst *fileListView) bool {
+	_, srcRemote := src.fs.(remoteConnFS)
+	_, dstRemote := dst.fs.(remoteConnFS)
+	if srcRemote || dstRemote {
+		dialog.ShowInformation("Not Supported Yet", "Moving multiple items to/from a remote connection isn't supported yet — try Copy (F5), then delete the originals.", c.win)
+		return true
+	}
+	return false
+}
+
+// performRename is the single-item Rename/Move dialog's OK handler.
+// oldPath/newPath are both already view/opposite-view's own presented
+// paths (see doMoveOrRename). A same-connection rename goes through that
+// connection's own native Rename; a cross-filesystem rename/move (crossing
+// into or out of a remote connection) isn't supported yet — same reasoning
+// as blockIfRemoteMove, just detected after the fact here since only
+// newPath's actual value (typed by the user) reveals whether it stayed on
+// the same connection or not.
+func (c *commander) performRename(view *fileListView, oldPath, newPath string, sourcePane *pane) {
+	if srcSF, ok := view.fs.(remoteConnFS); ok {
+		if !srcSF.IsInside(newPath) {
+			dialog.ShowInformation("Not Supported Yet", "Moving between a remote connection and somewhere else isn't supported yet — try Copy (F5), then delete the original.", c.win)
+			return
+		}
+		if err := srcSF.Rename(oldPath, newPath); err != nil {
+			dialog.ShowError(err, c.win)
+			return
+		}
+		sourcePane.activeView().Reload()
+		c.inactivePaneOf(sourcePane).activeView().Reload()
+		return
+	}
+	if _, ok := c.inactivePaneOf(sourcePane).activeView().fs.(remoteConnFS); ok {
+		dialog.ShowInformation("Not Supported Yet", "Moving between a remote connection and somewhere else isn't supported yet — try Copy (F5), then delete the original.", c.win)
+		return
+	}
+
 	if err := fsops.Rename(oldPath, newPath); err != nil {
 		// Likely a cross-device rename; fall back to copy+delete into the
 		// target directory (the MVP fallback keeps the original name — a
@@ -160,7 +289,8 @@ func (c *commander) performRename(oldPath, newPath string, sourcePane *pane) {
 
 func (c *commander) doMkdir() {
 	p := c.activePane()
-	if c.blockIfArchive(p.activeView()) {
+	view := p.activeView()
+	if c.blockIfArchive(view) || c.blockIfListbox(view) {
 		return
 	}
 	state := p.activeState()
@@ -180,12 +310,17 @@ func (c *commander) doMkdir() {
 		if !ok || strings.TrimSpace(nameEntry.Text) == "" {
 			return
 		}
-		target := filepath.Join(state.Path, nameEntry.Text)
-		if err := fsops.Mkdir(target); err != nil {
+		// view.fs.Mkdir, not fsops.Mkdir — Mkdir is already part of every
+		// vfs.FileSystem backend (localfs.Mkdir is exactly os.Mkdir anyway),
+		// so this works for local and remote connections alike with no
+		// type-switch needed; MkdirAll-vs-Mkdir doesn't matter here since
+		// the parent (state.Path) always already exists.
+		target := view.fs.Join(state.Path, nameEntry.Text)
+		if err := view.fs.Mkdir(target); err != nil {
 			dialog.ShowError(err, c.win)
 			return
 		}
-		p.activeView().Reload()
+		view.Reload()
 	}, c.win)
 	d.Resize(fyne.NewSize(560, 160))
 	showDialog(d)
@@ -204,18 +339,23 @@ func (c *commander) doDeletePermanent() { c.doDelete(true) }
 
 func (c *commander) doDelete(permanent bool) {
 	p := c.activePane()
-	if c.blockIfArchive(p.activeView()) {
+	view := p.activeView()
+	if c.blockIfArchive(view) {
 		return
 	}
-	paths := p.activeView().SelectionOrCursor()
+	paths := view.SelectionOrCursor()
 	if len(paths) == 0 {
 		c.showStatus("nothing to delete")
 		return
 	}
 
+	// A remote connection has no trash — deleting there is always a real,
+	// permanent remove, matching what F8/Shift+F8 both do on a real remote
+	// server (there's no OS-level trash can on the other end to move into).
+	remoteFS, remote := view.fs.(remoteConnFS)
 	title := "Move to Trash"
 	msg := fmt.Sprintf("Send %d item(s) to the trash?", len(paths))
-	if permanent {
+	if permanent || remote {
 		title = "Delete Permanently"
 		msg = fmt.Sprintf("PERMANENTLY delete %d item(s)? This cannot be undone.", len(paths))
 	}
@@ -224,12 +364,22 @@ func (c *commander) doDelete(permanent bool) {
 			return
 		}
 		go func() {
-			err := fsops.Delete(paths, permanent)
+			var err error
+			if remote {
+				for _, path := range paths {
+					if rmErr := remoteFS.Remove(path); rmErr != nil {
+						err = rmErr
+						break
+					}
+				}
+			} else {
+				err = fsops.Delete(paths, permanent)
+			}
 			fyne.Do(func() {
 				if err != nil {
 					dialog.ShowError(err, c.win)
 				}
-				p.activeView().Reload()
+				view.Reload()
 			})
 		}()
 	}, c.win))

@@ -271,6 +271,39 @@ into (Unlimited / Just this folder / 1-10 levels deep) — guards against an
 accidental search of somewhere huge (e.g. "/") running away; reopens with
 whatever you last chose.
 
+CONNECTIONS MANAGER:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File menu / F9 popup → Connections…, or the 🖥 toolbar button next to 🔍
+Search on each pane (connects straight into that specific pane). Save named
+SFTP, SMB, or FileAgent connections and open one in a brand new tab that
+browses, renames, moves, creates folders in, and deletes from the remote
+server exactly like a local directory — F5 Copy downloads/uploads for real;
+there's no separate "sync" step. Passwords/passphrases/pre-shared keys are
+stored in the OS keychain, never in the saved connection's own file on disk.
+Host/Port aren't limited to the standard SSH/SMB/FileAgent ports — a custom
+Port also covers connecting through firewall port-forwarding, exactly like
+an ssh -p <port> alias would. SFTP host keys use standard SSH
+trust-on-first-use: the first connect (and any time the key genuinely
+changes since) asks you to confirm the fingerprint before proceeding.
+FileAgent connects to a KrankyBearFileMover instance running as -file-agent
+on another machine (github.com/amarillier/KrankyBearFileMover — a separate
+small app for sharing/transferring files) — it authenticates with a
+pre-shared key alone (no username) and a TLS certificate pin you enter
+directly, copied from wherever the listener printed it on startup; unlike
+SFTP there's no trust-on-first-use step, the pin is expected to already be
+known before the first connect. FileMover generates a brand new pre-shared
+key AND certificate (so a new pin) every time -file-agent starts — saved
+credentials keep working for as long as that same listener process keeps
+running, however many times you connect/disconnect, but stop it and start
+it again (even a restart on the same machine/port) and both fields need
+re-pasting from what it prints that time; Edit the saved connection to
+update them rather than deleting and re-adding it.
+Not yet supported against a connection: F4 Edit, Compress, Create Symbolic
+Link, Multi-Rename Tool, Add to Favorites, and moving multiple items
+to/from a connection in one F6 batch (a single-item Rename/Move within the
+same connection does work) — each refuses with a clear message rather than
+doing something wrong.
+
 SMART FEATURES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✨ Tab/pane/window layout, panel colors, favorites, editor choice, hidden-

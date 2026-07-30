@@ -23,6 +23,7 @@ import (
 	"commander/internal/launch"
 	"commander/internal/panelstate"
 	"commander/internal/vfs"
+	"commander/internal/vfs/listboxfs"
 	"commander/internal/vfs/localfs"
 	"commander/internal/vfs/zipfs"
 )
@@ -95,6 +96,16 @@ type fileListView struct {
 	// Refresh (both view modes' cell objects are only reachable from there).
 	renaming          *renamingState
 	activeRenameField *renameEntry
+
+	// nameStretch is any width this view's Table currently has left over
+	// once every column's own stored width (columnWidths) is accounted for
+	// — handed entirely to the Name column (see handleTableResize) rather
+	// than left as dead space to the right of Perm, since a wider window is
+	// most useful for reading longer file/directory names specifically.
+	// Per-view, not persisted/shared like columnWidths itself: the two
+	// panes can differ in width (draggable HSplit divider), and Brief view
+	// doesn't use this at all.
+	nameStretch float32
 }
 
 func newFileListView(fs vfs.FileSystem, state *panelstate.State, colors func() ColorScheme, showHidden func() bool, briefColumns func() int, defaultHome func() string, isActive func() bool) *fileListView {
@@ -109,13 +120,17 @@ func (v *fileListView) Build() fyne.CanvasObject {
 	v.header[2] = widget.NewButton("", func() { v.setSort(panelstate.SortSize) })
 	v.header[3] = widget.NewButton("", func() { v.setSort(panelstate.SortModified) })
 	v.permHeader = widget.NewLabel("Perm")
-	labels := container.New(columnsLayout{}, v.header[0], v.header[1], v.header[2], v.header[3], v.permHeader)
+	nameExtra := func() float32 { return v.nameStretch }
+	labels := container.New(columnsLayout{nameExtra: nameExtra}, v.header[0], v.header[1], v.header[2], v.header[3], v.permHeader)
 	// One resize handle per boundary BETWEEN columns (not after the last,
 	// Perm) — a separate overlay stacked on top of the label row, so
 	// adding resize handles doesn't touch columnsLayout's own object list.
-	handles := container.New(resizeHandleLayout{},
-		newColumnResizeHandle(colName), newColumnResizeHandle(colExt),
-		newColumnResizeHandle(colSize), newColumnResizeHandle(colModified))
+	fitWidth := func(col int) func() float32 {
+		return func() float32 { return v.columnContentWidth(col) }
+	}
+	handles := container.New(resizeHandleLayout{nameExtra: nameExtra},
+		newColumnResizeHandle(colName, fitWidth(colName)), newColumnResizeHandle(colExt, fitWidth(colExt)),
+		newColumnResizeHandle(colSize, fitWidth(colSize)), newColumnResizeHandle(colModified, fitWidth(colModified)))
 	v.headerRow = container.NewStack(labels, handles)
 	v.root = container.NewStack()
 	v.Reload()
@@ -406,7 +421,9 @@ type keyTable struct {
 	widget.Table
 	onOtherKey      func(*fyne.KeyEvent)
 	onSecondaryTap  func(*fyne.PointEvent)
-	pendingModifier fyne.KeyModifier // Shift/Ctrl held on the click currently in flight — see MouseDown
+	onResize        func(width float32) // pane was actually resized — see fileListView.handleTableResize
+	onActivate      func()              // any click landed in the table's bounds — see MouseDown
+	pendingModifier fyne.KeyModifier    // Shift/Ctrl held on the click currently in flight — see MouseDown
 }
 
 func newKeyTable(length func() (int, int), create func() fyne.CanvasObject, update func(widget.TableCellID, fyne.CanvasObject), onOtherKey func(*fyne.KeyEvent), onSecondaryTap func(*fyne.PointEvent)) *keyTable {
@@ -416,6 +433,16 @@ func newKeyTable(length func() (int, int), create func() fyne.CanvasObject, upda
 	t.UpdateCell = update
 	t.ExtendBaseWidget(t)
 	return t
+}
+
+// Resize lets the Name column claim any width left over once the pane grows
+// past what every column's own stored width adds up to, instead of leaving
+// it as dead space to the right of Perm — see fileListView.handleTableResize.
+func (t *keyTable) Resize(size fyne.Size) {
+	t.Table.Resize(size)
+	if t.onResize != nil {
+		t.onResize(size.Width)
+	}
 }
 
 func (t *keyTable) TypedKey(ev *fyne.KeyEvent) {
@@ -446,8 +473,20 @@ func (t *keyTable) TappedSecondary(e *fyne.PointEvent) {
 // hands back a bare TableCellID, with no modifier info at all. The
 // modifier is stashed in pendingModifier and consumed by handleTableTap
 // immediately after, for exactly this one click.
+//
+// onActivate fires here rather than only from handleTableTap because the
+// Table widget itself fills its whole pane (Border stretches the center
+// slot), so clicking blank space below the last row is still a MouseDown on
+// this widget — but Select/OnSelected (what drives handleTableTap) only
+// fires for a click that actually resolves to a row. Without this, clicking
+// into an otherwise-inactive pane's tab anywhere below its last row would
+// silently leave the OTHER pane active, so an F-key right after would act
+// on the wrong side with no visible sign anything was wrong.
 func (t *keyTable) MouseDown(e *desktop.MouseEvent) {
 	t.pendingModifier = e.Modifier
+	if t.onActivate != nil {
+		t.onActivate()
+	}
 	t.Table.MouseDown(e)
 }
 
@@ -499,12 +538,30 @@ func loadColumnWidths(a fyne.App) {
 	}
 }
 
-// columnsLayout lays out its children left-to-right at exactly columnWidths,
-// with theme.Padding() between them — matching how widget.Table spaces its
-// own columns (see Table's columnAt: `visibleColWidths[i-1] + padding`).
-type columnsLayout struct{}
+// columnsLayout lays out its children left-to-right at exactly columnWidths
+// (plus nameExtra() on colName — see fileListView.nameStretch), with
+// theme.Padding() between them — matching how widget.Table spaces its own
+// columns (see Table's columnAt: `visibleColWidths[i-1] + padding`).
+type columnsLayout struct {
+	nameExtra func() float32
+}
 
-func (columnsLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+func (cl columnsLayout) width(i int) float32 {
+	w := columnWidths[i]
+	if i == colName && cl.nameExtra != nil {
+		w += cl.nameExtra()
+	}
+	return w
+}
+
+// MinSize deliberately uses columnWidths alone, NOT cl.width (which adds
+// nameExtra's stretch bonus): nameStretch is only ever "however much extra
+// room happens to be available right now" (fileListView.handleTableResize),
+// so counting it toward the window's MINIMUM size would make a window
+// that's momentarily wide report a bigger floor, which would then never let
+// it shrink back down again — a self-reinforcing lock rather than a real
+// minimum.
+func (cl columnsLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 	pad := theme.Padding()
 	var width, height float32
 	for i, o := range objects {
@@ -519,11 +576,11 @@ func (columnsLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 	return fyne.NewSize(width, height)
 }
 
-func (columnsLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+func (cl columnsLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	pad := theme.Padding()
 	var x float32
 	for i, o := range objects {
-		w := columnWidths[i]
+		w := cl.width(i)
 		o.Move(fyne.NewPos(x, 0))
 		o.Resize(fyne.NewSize(w, size.Height))
 		x += w + pad
@@ -565,7 +622,41 @@ func (v *fileListView) buildTable() *keyTable {
 	t.SetColumnWidth(colModified, columnWidths[colModified])
 	t.SetColumnWidth(colPerm, columnWidths[colPerm])
 	t.OnSelected = v.handleTableTap
+	t.onResize = v.handleTableResize
+	t.onActivate = func() {
+		if v.onFocusGained != nil {
+			v.onFocusGained()
+		}
+	}
 	return t
+}
+
+// handleTableResize recomputes nameStretch for the pane's current width
+// (available) and, if it changed, pushes the new Name column width into the
+// table and re-lays-out the header/resize-handle overlay to match. Called
+// whenever the pane is actually resized (keyTable.Resize) and whenever any
+// column's own stored width changes (applyColumnWidth) — both change how
+// much, if anything, is left over.
+func (v *fileListView) handleTableResize(available float32) {
+	var total float32
+	for _, w := range columnWidths {
+		total += w
+	}
+	total += theme.Padding() * float32(tableColumnCount-1)
+	extra := available - total
+	if extra < 0 {
+		extra = 0
+	}
+	if extra == v.nameStretch {
+		return
+	}
+	v.nameStretch = extra
+	if v.table != nil {
+		v.table.SetColumnWidth(colName, columnWidths[colName]+v.nameStretch)
+	}
+	if v.headerRow != nil {
+		v.headerRow.Refresh()
+	}
 }
 
 // applyColumnWidth is commander.columnResized's per-view half: pushes a
@@ -581,6 +672,11 @@ func (v *fileListView) applyColumnWidth(col int, width float32) {
 	}
 	if v.headerRow != nil {
 		v.headerRow.Refresh()
+	}
+	// A column's own width changing shifts how much (if any) is left over
+	// for nameStretch, even though the pane itself wasn't resized.
+	if v.table != nil {
+		v.handleTableResize(v.table.Size().Width)
 	}
 }
 
@@ -671,42 +767,9 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 				canvas.Unfocus()
 			}
 		}
-		txt.Text = entry.Name
-	case colExt:
-		if entry.Name == parentEntryName || entry.IsDir {
-			txt.Text = ""
-		} else {
-			txt.Text = fileExt(entry.Name)
-		}
-	case colSize:
-		switch {
-		case entry.Name == parentEntryName:
-			if v.computedParentSize != nil {
-				txt.Text = humanSize(*v.computedParentSize)
-			} else {
-				txt.Text = ""
-			}
-		case entry.IsDir:
-			if sz, ok := v.computedSizes[entry.Name]; ok {
-				txt.Text = humanSize(sz)
-			} else {
-				txt.Text = "<DIR>"
-			}
-		default:
-			txt.Text = humanSize(entry.Size)
-		}
-	case colModified:
-		if entry.Name == parentEntryName {
-			txt.Text = ""
-		} else {
-			txt.Text = entry.ModTime.Format("2006-01-02 15:04")
-		}
-	case colPerm:
-		if entry.Name == parentEntryName {
-			txt.Text = ""
-		} else {
-			txt.Text = entry.Mode.String()
-		}
+		txt.Text = v.columnText(entry, colName)
+	default:
+		txt.Text = v.columnText(entry, id.Col)
 	}
 	if !renaming {
 		hn.SetToolTip(txt.Text) // full, untruncated text — set before truncating below
@@ -714,11 +777,81 @@ func (v *fileListView) updateCell(id widget.TableCellID, o fyne.CanvasObject) {
 		if textSize == 0 {
 			textSize = theme.TextSize()
 		}
-		maxWidth := columnWidths[id.Col] - columnTextMargin(id.Col, check)
+		colWidth := columnWidths[id.Col]
+		if id.Col == colName {
+			colWidth += v.nameStretch
+		}
+		maxWidth := colWidth - columnTextMargin(id.Col, check)
 		txt.Text = truncateToWidth(txt.Text, maxWidth, textSize, txt.TextStyle)
 	}
 	check.Refresh()
 	txt.Refresh()
+}
+
+// columnText is col's display text for entry — extracted out of updateCell
+// so autoFitColumn's width calculation (columnresize_ui.go) and the actual
+// cell render always agree on what a column shows.
+func (v *fileListView) columnText(entry vfs.Entry, col int) string {
+	switch col {
+	case colName:
+		return entry.Name
+	case colExt:
+		if entry.Name == parentEntryName || entry.IsDir {
+			return ""
+		}
+		return fileExt(entry.Name)
+	case colSize:
+		switch {
+		case entry.Name == parentEntryName:
+			if v.computedParentSize != nil {
+				return humanSize(*v.computedParentSize)
+			}
+			return ""
+		case entry.IsDir:
+			if sz, ok := v.computedSizes[entry.Name]; ok {
+				return humanSize(sz)
+			}
+			return "<DIR>"
+		default:
+			return humanSize(entry.Size)
+		}
+	case colModified:
+		if entry.Name == parentEntryName {
+			return ""
+		}
+		return entry.ModTime.Format("2006-01-02 15:04")
+	case colPerm:
+		if entry.Name == parentEntryName {
+			return ""
+		}
+		return entry.Mode.String()
+	}
+	return ""
+}
+
+// columnContentWidth is the widest rendered text col currently has anywhere
+// in this view's listing (every row, not just what's scrolled into view —
+// entries drive both alike, so there's no separate notion of "visible" to
+// track here). Used by columnResizeHandle's double-click-to-auto-fit
+// (columnresize_ui.go) to size the column to its content, Excel-style.
+func (v *fileListView) columnContentWidth(col int) float32 {
+	textSize := theme.TextSize()
+	driver := fyne.CurrentApp().Driver()
+	var maxWidth float32
+	for row := 0; row < v.rowCount(); row++ {
+		entry, ok := v.entryAt(row)
+		if !ok {
+			continue
+		}
+		text := v.columnText(entry, col)
+		if text == "" {
+			continue
+		}
+		if sz, _ := driver.RenderedTextSize(text, textSize, fyne.TextStyle{}, nil); sz.Width > maxWidth {
+			maxWidth = sz.Width
+		}
+	}
+	return maxWidth
 }
 
 // columnTextMargin is how much of a column's width isn't available to its
@@ -1126,26 +1259,59 @@ func (v *fileListView) enterZip(zipPath string) {
 	v.reloadAfterNavigate()
 }
 
-// adjustFSForTarget swaps this view back onto the real filesystem the
-// moment a navigation target (typically ".." from an open archive's own
-// root, but equally a Home/Favorites jump) is no longer inside the
-// currently-open archive — see zipfs.FS.Dir's doc comment for why this is
-// the one place that needs to know about the swap at all.
-func (v *fileListView) adjustFSForTarget(target string) {
-	zfs, ok := v.fs.(*zipfs.FS)
-	if !ok || zfs.IsInside(target) {
-		return
+// enterListbox swaps this view (in place, like enterZip for archives) onto a
+// flat, non-hierarchical view of exactly the given real files — matches maps
+// each entry's display name (search_ui.go's listboxNames) to its real
+// absolute path, which can be in any real directory, not just root's own;
+// root is purely this view's synthetic Path label (see listboxfs.New),
+// nothing needs to actually exist there. Reports false (tab left untouched)
+// if the tab is locked against navigation, same as enterZip.
+func (v *fileListView) enterListbox(root string, matches map[string]string) bool {
+	if !v.state.Navigate(root) {
+		return false
 	}
-	zfs.Close()
-	v.fs = localfs.New()
+	v.fs = listboxfs.New(root, matches)
+	v.reloadAfterNavigate()
+	return true
 }
 
-// closeFS releases this view's open archive handle, if it's currently
-// browsing one — called when its tab closes (see paneview.go's
+// swappableFS is satisfied by every non-local vfs.FileSystem a tab can have
+// swapped in in place — an open archive (zipfs), a listbox view
+// (listboxfs), or a remote connection (sftpfs, and later fileagentfs).
+// adjustFSForTarget uses it to fall back to a real vfs.FileSystem
+// generically, one interface rather than one type-switch case per backend.
+type swappableFS interface {
+	// IsInside reports whether target is still "within" this filesystem —
+	// e.g. a path inside an open archive, or a live remote connection's own
+	// host (see each implementation's doc comment for its exact rule).
+	IsInside(target string) bool
+	// Close releases whatever real resource this filesystem holds (an open
+	// archive handle, a live network connection) — a no-op for a backend
+	// that holds nothing real, like listboxfs.
+	Close() error
+}
+
+// adjustFSForTarget swaps this view back onto the real filesystem the
+// moment a navigation target is no longer "inside" whatever swappableFS
+// this view currently has swapped in — typically ".." from an open
+// archive's/connection's own root, but equally a Home/Favorites jump. See
+// each backend's IsInside doc comment for what "inside" means for it.
+func (v *fileListView) adjustFSForTarget(target string) {
+	sf, ok := v.fs.(swappableFS)
+	if !ok || sf.IsInside(target) {
+		return
+	}
+	sf.Close()
+	v.fs = localfs.New()
+	v.state.TabTitle = "" // any friendly name (e.g. a connection's) described the tab just left, not local browsing
+}
+
+// closeFS releases this view's swappableFS resource, if it currently has
+// one swapped in — called when its tab closes (see paneview.go's
 // CloseIntercept), since nothing else would ever navigate it back out.
 func (v *fileListView) closeFS() {
-	if zfs, ok := v.fs.(*zipfs.FS); ok {
-		zfs.Close()
+	if sf, ok := v.fs.(swappableFS); ok {
+		sf.Close()
 	}
 }
 

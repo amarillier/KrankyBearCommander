@@ -35,10 +35,16 @@ func (c *commander) handleDropped(pos fyne.Position, uris []fyne.URI) {
 	if view == nil {
 		return
 	}
-	if c.blockIfArchive(view) {
+	if c.blockIfArchive(view) || c.blockIfListbox(view) {
 		return
 	}
-	c.runFileOp("Copying", paths, view.CurrentPath(), fsops.Copy, p)
+	// Dropped files are always real local paths (from Finder/Explorer/
+	// Nautilus) — only the destination might be a remote connection.
+	op := fsOpFunc(fsops.Copy)
+	if remoteFS, ok := view.fs.(remoteConnFS); ok {
+		op = remoteFS.Upload
+	}
+	c.runFileOp("Copying", paths, view.CurrentPath(), op, p)
 }
 
 // paneAt resolves which pane a window-relative position falls into, based

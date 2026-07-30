@@ -52,7 +52,34 @@ func (c *commander) doView() {
 		c.showZipPreviewPicker(fullPath)
 		return
 	}
+	if remoteFS, ok := view.fs.(remoteConnFS); ok {
+		c.viewRemoteMember(remoteFS, entry.Name, fullPath)
+		return
+	}
 	showViewer(c.app, fullPath)
+}
+
+// viewRemoteMember downloads fullPath (a presented path on remoteFS) to a
+// temp file in the background, then opens the normal viewer on it —
+// mirroring viewArchivedMember's "extract to temp, then view" for an open
+// archive, just off the main goroutine: unlike reading a local zip, a
+// network round trip isn't instant.
+func (c *commander) viewRemoteMember(remoteFS remoteConnFS, name, presentedPath string) {
+	go func() {
+		dir, err := os.MkdirTemp("", "krankybear-remote-*")
+		if err != nil {
+			fyne.Do(func() { c.showStatus("cannot view " + name + ": " + err.Error()) })
+			return
+		}
+		err = remoteFS.Download([]string{presentedPath}, dir, nil, nil)
+		fyne.Do(func() {
+			if err != nil {
+				c.showStatus("cannot view " + name + ": " + err.Error())
+				return
+			}
+			showViewer(c.app, filepath.Join(dir, name))
+		})
+	}()
 }
 
 func showViewer(a fyne.App, path string) {

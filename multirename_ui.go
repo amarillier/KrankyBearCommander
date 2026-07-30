@@ -8,7 +8,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -63,7 +62,14 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 	if view == nil {
 		return
 	}
-	if c.blockIfArchive(view) {
+	// blockIfListbox here specifically: a listbox's entries can each be in a
+	// completely different real directory, but applyMultiRename's
+	// same-batch-collision temp-rename pass assumes one shared dir for
+	// everything being renamed — not worth the complexity for a batch tool
+	// against what's fundamentally a single-item-at-a-time search-results
+	// view (inline rename, rename_ui.go, handles that case correctly).
+	// blockIfRemote for the same reason against a remote SFTP connection.
+	if c.blockIfArchive(view) || c.blockIfListbox(view) || c.blockIfRemote(view) {
 		return
 	}
 	names := view.SelectionOrCursorNames()
@@ -163,7 +169,7 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 			dialog.ShowError(err, c.win)
 			return
 		}
-		if err := applyMultiRename(dir, names, out); err != nil {
+		if err := applyMultiRename(view.fs.Join, dir, names, out); err != nil {
 			dialog.ShowError(err, c.win)
 		} else {
 			// Selection is tracked by name, so a renamed file silently
@@ -203,7 +209,12 @@ func multiRenameDialogSize(win fyne.Window) fyne.Size {
 // same-batch collisions/permutations (e.g. swapping two files' names, or
 // shifting a whole sequence) can never clobber each other, without needing
 // a per-item conflict dialog for what's meant to be one bulk operation.
-func applyMultiRename(dir string, oldNames, newNames []string) error {
+// join is the view's own vfs.FileSystem.Join, not filepath.Join directly —
+// dir is only ever a real, directly-usable directory for the local backend;
+// a listbox view's dir is a synthetic label whose entries can each be a real
+// file in a completely different real directory (see listboxfs.FS.Join),
+// which only the view's own Join knows how to resolve correctly.
+func applyMultiRename(join func(...string) string, dir string, oldNames, newNames []string) error {
 	// Case-insensitive: macOS (APFS) and Windows (NTFS) both default to
 	// case-insensitive filesystems, so a rename that only changes case
 	// (e.g. fixing "80s" that got wrongly title-cased to "80S" — a real
@@ -238,7 +249,7 @@ func applyMultiRename(dir string, oldNames, newNames []string) error {
 		if oldSet[strings.ToLower(newName)] {
 			continue // part of this batch — safe via the temp-name pass below
 		}
-		if _, err := os.Lstat(filepath.Join(dir, newName)); err == nil {
+		if _, err := os.Lstat(join(dir, newName)); err == nil {
 			return fmt.Errorf("%q already exists", newName)
 		}
 	}
@@ -249,7 +260,7 @@ func applyMultiRename(dir string, oldNames, newNames []string) error {
 			continue
 		}
 		tmp := fmt.Sprintf(".kbc-rename-tmp-%d-%d", os.Getpid(), i)
-		if err := fsops.Rename(filepath.Join(dir, old), filepath.Join(dir, tmp)); err != nil {
+		if err := fsops.Rename(join(dir, old), join(dir, tmp)); err != nil {
 			return fmt.Errorf("renaming %q: %w", old, err)
 		}
 		temps[i] = tmp
@@ -258,7 +269,7 @@ func applyMultiRename(dir string, oldNames, newNames []string) error {
 		if oldNames[i] == newName {
 			continue
 		}
-		if err := fsops.Rename(filepath.Join(dir, temps[i]), filepath.Join(dir, newName)); err != nil {
+		if err := fsops.Rename(join(dir, temps[i]), join(dir, newName)); err != nil {
 			return fmt.Errorf("renaming to %q: %w", newName, err)
 		}
 	}

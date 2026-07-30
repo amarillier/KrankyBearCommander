@@ -37,6 +37,7 @@ type pane struct {
 	onFavorites          func()                                                            // Favorites button clicked; commander owns the shared list (favorites_ui.go)
 	onContextMenu        func(p *pane, view *fileListView, name string, pos fyne.Position) // right-click on a row; commander owns the menu (contextmenu_ui.go)
 	onSearch             func()                                                            // Search button clicked; commander owns the search dialog (search_ui.go)
+	onConnections        func()                                                            // Connection button clicked; commander owns the Connections manager (connections_ui.go), opening a new tab in THIS pane
 	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)                   // Enter/double-click on a file inside an open archive; commander extracts + opens it (archive_browse_ui.go)
 	onEject              func(root string) error                                           // Eject clicked on a drive button; commander navigates both panes off it first (drivebutton_ui.go)
 	onRefreshAll         func()                                                            // this pane's own ⟳ drive-bar button clicked; commander refreshes both panes (see commander.doRefresh) rather than just this one
@@ -56,8 +57,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func()) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func()) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -101,7 +102,16 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	})
 	searchBtn.SetToolTip("Search this tab's directory recursively by name or pattern")
 
-	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn)
+	connectionsBtn := ttwidget.NewButtonWithIcon("", theme.ComputerIcon(), func() {
+		p.onActivated()
+		if p.onConnections != nil {
+			p.onConnections()
+		}
+		unfocus()
+	})
+	connectionsBtn.SetToolTip("Connect to a saved remote connection, opening it in a new tab in this pane")
+
+	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn, connectionsBtn)
 	p.driveBar = container.NewHScroll(p.buildDriveBarContent())
 
 	p.tabs = container.NewDocTabs()
@@ -224,9 +234,31 @@ func (p *pane) addTabFromState(state *panelstate.State) *container.TabItem {
 	return item
 }
 
+// addTabFromStateWithFS is addTabFromState, but rooted at an explicit
+// vfs.FileSystem instead of the pane's own p.fs — used when connecting to a
+// saved Connection (Connections manager, connections_ui.go), where state's
+// starting Path is wherever THAT filesystem's own top is, not anywhere
+// under p.fs. A separate function rather than a parameter on newTabItem
+// itself: building the view with the right fs from the start avoids an
+// initial Reload() against the wrong (local) filesystem that overriding
+// view.fs after the fact would otherwise waste.
+func (p *pane) addTabFromStateWithFS(state *panelstate.State, fs vfs.FileSystem) *container.TabItem {
+	view := newFileListView(fs, state, p.colors, p.showHidden, p.briefColumns, p.defaultHome, p.isActivePane)
+	p.bindView(view)
+	item := container.NewTabItem(tabLabel(state), view.Build())
+	p.views = append(p.views, view)
+	p.states = append(p.states, state)
+	p.tabs.Append(item)
+	p.tabs.SelectIndex(len(p.tabs.Items) - 1)
+	p.refreshChrome()
+	return item
+}
+
 func tabLabel(state *panelstate.State) string {
 	name := state.Path
-	if base := lastPathComponent(state.Path); base != "" {
+	if state.TabTitle != "" {
+		name = state.TabTitle
+	} else if base := lastPathComponent(state.Path); base != "" {
 		name = base
 	}
 	if state.Locked {
