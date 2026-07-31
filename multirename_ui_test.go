@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"commander/internal/vfs/localfs"
 )
 
 func mustWriteTestFile(t *testing.T, path, content string) {
@@ -27,7 +29,7 @@ func TestApplyMultiRenameSimple(t *testing.T) {
 	mustWriteTestFile(t, filepath.Join(dir, "a.txt"), "A")
 	mustWriteTestFile(t, filepath.Join(dir, "b.txt"), "B")
 
-	err := applyMultiRename(filepath.Join, dir, []string{"a.txt", "b.txt"}, []string{"x.txt", "y.txt"})
+	err := applyMultiRename(localfs.New(), dir, []string{"a.txt", "b.txt"}, []string{"x.txt", "y.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +52,7 @@ func TestApplyMultiRenameSwap(t *testing.T) {
 	mustWriteTestFile(t, filepath.Join(dir, "a.txt"), "A")
 	mustWriteTestFile(t, filepath.Join(dir, "b.txt"), "B")
 
-	err := applyMultiRename(filepath.Join, dir, []string{"a.txt", "b.txt"}, []string{"b.txt", "a.txt"})
+	err := applyMultiRename(localfs.New(), dir, []string{"a.txt", "b.txt"}, []string{"b.txt", "a.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +68,7 @@ func TestApplyMultiRenameNoChangeIsNoop(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteTestFile(t, filepath.Join(dir, "a.txt"), "A")
 
-	err := applyMultiRename(filepath.Join, dir, []string{"a.txt"}, []string{"a.txt"})
+	err := applyMultiRename(localfs.New(), dir, []string{"a.txt"}, []string{"a.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,7 @@ func TestApplyMultiRenameRejectsDuplicateResults(t *testing.T) {
 	mustWriteTestFile(t, filepath.Join(dir, "a.txt"), "A")
 	mustWriteTestFile(t, filepath.Join(dir, "b.txt"), "B")
 
-	err := applyMultiRename(filepath.Join, dir, []string{"a.txt", "b.txt"}, []string{"same.txt", "same.txt"})
+	err := applyMultiRename(localfs.New(), dir, []string{"a.txt", "b.txt"}, []string{"same.txt", "same.txt"})
 	if err == nil {
 		t.Fatal("expected an error for two items renaming to the same result")
 	}
@@ -98,7 +100,7 @@ func TestApplyMultiRenameRejectsCollisionWithUnrelatedFile(t *testing.T) {
 	mustWriteTestFile(t, filepath.Join(dir, "a.txt"), "A")
 	mustWriteTestFile(t, filepath.Join(dir, "existing.txt"), "existing")
 
-	err := applyMultiRename(filepath.Join, dir, []string{"a.txt"}, []string{"existing.txt"})
+	err := applyMultiRename(localfs.New(), dir, []string{"a.txt"}, []string{"existing.txt"})
 	if err == nil {
 		t.Fatal("expected an error when the new name collides with an unrelated existing file")
 	}
@@ -120,7 +122,7 @@ func TestApplyMultiRenameCaseOnlyRenameOfSelf(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteTestFile(t, filepath.Join(dir, "80s rock.mp3"), "content")
 
-	err := applyMultiRename(filepath.Join, dir, []string{"80s rock.mp3"}, []string{"80S rock.mp3"})
+	err := applyMultiRename(localfs.New(), dir, []string{"80s rock.mp3"}, []string{"80S rock.mp3"})
 	if err != nil {
 		t.Fatal(err)
 	}

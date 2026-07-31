@@ -1,9 +1,44 @@
-Next phase v0.9.0:
-- Connections manager: F4 Edit, Compress, Create Symbolic Link, Multi-Rename Tool, Add to Favorites, and multi-item cross-connection Move against a connection tab - all currently just refuse cleanly for SFTP/SMB/FileAgent alike, each would need its own dedicated remote-aware plumbing. Box/Dropbox/Google Drive still just "maybe" - not committing to doing everything.
-
 Later phase someday maybe if practical - low priority now
 - TotalCmd launch apps toolbar - drag apps onto a config, launch them from Commander; used something like this a lot years ago, then found a free Windows Executor tool, hotkey-activated. Still like the idea, but since ../KrankyBearExecutor already covers hotkey-based launches, this would only be a nice-to-have convenience, not a real need - maybe, maybe never, and far lower value than Connections manager
 - drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-kused of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+
+Version 0.9.0 - July 31, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW A failed Connect in the Connections manager now opens that
+   connection's Edit form directly, with the error shown right at the top,
+   instead of a dead-end error dialog — the single most common cause is a
+   stale saved password/passphrase/pre-shared key or (for FileAgent
+   specifically) a TLS pin from before the listener was last restarted, so
+   the fix is almost always "update this connection," not a separate
+   click-Edit-yourself step.
+✨ NEW Connections manager: F4 Edit, Compress, Create Symbolic Link,
+   Multi-Rename Tool, Add to Favorites, and Copy/Move all now work against
+   a connection tab, not just locally. F4 always uses the built-in editor
+   against a remote file (downloads to a temp copy, uploads back on every
+   Save, cleans up once the editor window closes) — external editors stay
+   local-file-only, since there's no reliable "the external process is
+   done editing" signal to re-upload on. Compress downloads the selection
+   to a temp copy first, then zips it, prompting for a destination the
+   same way it already did from a Listbox view. Create Symbolic Link works
+   for SFTP (a real SFTP op) and SMB (via NTFS reparse points — best-
+   effort, may not work against a Samba-backed share), but not FileAgent,
+   which has no matching op in its wire protocol. Multi-Rename Tool now
+   routes every check/rename through the connection itself instead of
+   assuming a real local path. Copy (F5) and Move (F6) both now support
+   moving/copying between two DIFFERENT connections directly (staged
+   through a local temp copy automatically) and multi-item Move to/from a
+   connection (previously Copy-only) — Move deletes the originals only
+   after the transfer has fully succeeded. Add to Favorites on a
+   connection tab now remembers which saved connection it came from,
+   reconnecting through it (a fresh tab) when you click that favorite
+   later, rather than trying to jump to a path with nothing connected yet;
+   if that connection has since been removed, clicking the favorite says
+   so clearly instead of silently failing.
+✨ NEW Pane status line now shows the current directory's total item
+   count and size (e.g. "42 item(s), 128 MB") whenever nothing is
+   selected, right where "[N selected, size]" already appears the moment
+   you do select something — reverts back to the total the instant the
+   selection is cleared.
 
 Version 0.8.0 - July 30, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

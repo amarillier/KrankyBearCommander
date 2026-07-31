@@ -37,29 +37,51 @@ func TestLoadMissingFileReturnsEmptyList(t *testing.T) {
 
 func TestAddDeduplicates(t *testing.T) {
 	var l List
-	l.Add("Projects", "/home/user/Projects")
-	l.Add("Projects (dup)", "/home/user/Projects")
+	l.Add("Projects", "/home/user/Projects", "")
+	l.Add("Projects (dup)", "/home/user/Projects", "")
 
 	if len(l.Entries) != 1 {
 		t.Fatalf("expected duplicate path to be ignored, got %+v", l.Entries)
 	}
-	if !l.Has("/home/user/Projects") {
+	if !l.Has("/home/user/Projects", "") {
 		t.Fatal("expected Has to report the added path")
 	}
 }
 
 func TestRemove(t *testing.T) {
 	var l List
-	l.Add("Desktop", "/home/user/Desktop")
-	l.Add("Downloads", "/home/user/Downloads")
+	l.Add("Desktop", "/home/user/Desktop", "")
+	l.Add("Downloads", "/home/user/Downloads", "")
 
-	l.Remove("/home/user/Desktop")
+	l.Remove("/home/user/Desktop", "")
 
 	if len(l.Entries) != 1 || l.Entries[0].Path != "/home/user/Downloads" {
 		t.Fatalf("expected only Downloads to remain, got %+v", l.Entries)
 	}
-	if l.Has("/home/user/Desktop") {
+	if l.Has("/home/user/Desktop", "") {
 		t.Fatal("expected Desktop to be gone after Remove")
+	}
+}
+
+// TestSamePathDifferentConnectionsAreDistinct is a regression guard for the
+// new ConnectionID field: two different saved connections can easily share
+// the same presented-path shape (e.g. both rooted at "/"), and that must
+// NOT be mistaken for the same favorite.
+func TestSamePathDifferentConnectionsAreDistinct(t *testing.T) {
+	var l List
+	l.Add("Server A root", "/", "conn-a")
+	l.Add("Server B root", "/", "conn-b")
+
+	if len(l.Entries) != 2 {
+		t.Fatalf("expected both connections' favorites to coexist, got %+v", l.Entries)
+	}
+	if !l.Has("/", "conn-a") || !l.Has("/", "conn-b") {
+		t.Fatal("expected Has to distinguish by connection ID")
+	}
+
+	l.Remove("/", "conn-a")
+	if len(l.Entries) != 1 || l.Entries[0].ConnectionID != "conn-b" {
+		t.Fatalf("expected only conn-b's favorite to remain, got %+v", l.Entries)
 	}
 }
 

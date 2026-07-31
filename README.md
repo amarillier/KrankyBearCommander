@@ -86,7 +86,10 @@ fixing and performance work.
   instance running as -file-agent on another machine, authenticating with a
   pre-shared key and a TLS certificate pin instead of a username. Host/Port
   aren't limited to the standard ports, so a firewall-forwarded port works
-  too, the same as an ssh -p alias would.
+  too, the same as an ssh -p alias would. F4 Edit, Compress, Create Symbolic
+  Link (SFTP/SMB), Multi-Rename Tool, Add to Favorites (reconnects
+  automatically when clicked later), and Copy/Move between two different
+  connections all work against a connection tab too, not just a local one.
 - **Built-in viewer and editor** (F3/F4) — text or a hex dump for binary
   files, and a simple text editor with Save/Save As. F4 can also launch any
   number of **external editors** you configure (name + command); pick the

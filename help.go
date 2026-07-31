@@ -298,11 +298,21 @@ running, however many times you connect/disconnect, but stop it and start
 it again (even a restart on the same machine/port) and both fields need
 re-pasting from what it prints that time; Edit the saved connection to
 update them rather than deleting and re-adding it.
-Not yet supported against a connection: F4 Edit, Compress, Create Symbolic
-Link, Multi-Rename Tool, Add to Favorites, and moving multiple items
-to/from a connection in one F6 batch (a single-item Rename/Move within the
-same connection does work) — each refuses with a clear message rather than
-doing something wrong.
+F4 Edit, Compress, Create Symbolic Link, Multi-Rename Tool, Add to
+Favorites, and F5 Copy/F6 Move all work against a connection now too: F4
+always uses the built-in editor against a remote file (downloads to a temp
+copy, uploads back on every Save — external editors stay local-file-only,
+since there's no reliable signal for "the external process is done
+editing"); Compress downloads the selection to a temp copy first, then
+zips it; Create Symbolic Link works for SFTP (a real SFTP op) and SMB
+(via NTFS reparse points — best-effort, may not work against a Samba-
+backed share), but not FileAgent, which has no equivalent in its wire
+protocol; Copy/Move between two DIFFERENT connections stages through a
+local temp copy automatically; Add to Favorites on a connection
+reconnects through that saved connection (opening a fresh tab) when you
+click it later, rather than just jumping to a path that isn't there yet —
+if that connection has since been removed, clicking the favorite says so
+clearly instead of failing silently.
 
 SMART FEATURES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

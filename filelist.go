@@ -47,13 +47,13 @@ type fileListView struct {
 	defaultHome  func() string // pane.defaultHome — where Reload jumps this tab if its current directory has vanished (see Reload)
 	isActive     func() bool   // whether this view's pane is the app's currently-active pane
 
-	onNavigated   func()                               // Path changed; let paneview refresh its tab title
-	onStatus      func(msg string)                     // brief status-line message, e.g. "tab is locked"
-	onSelection   func(count int, size int64)          // selection summary for the pane's status line
-	onCursorInfo  func(info string)                    // cursor row's name/size/modified (or item count for a dir)
-	onFocusGained func()                               // a row in this view was clicked; tell paneview to activate this pane
-	onOtherKey    func(*fyne.KeyEvent)                 // a key the table itself doesn't handle, while it has focus — see keyTable
-	onContextMenu func(name string, pos fyne.Position) // right-click on a row; commander owns the popup (contextmenu_ui.go)
+	onNavigated   func()                                                             // Path changed; let paneview refresh its tab title
+	onStatus      func(msg string)                                                   // brief status-line message, e.g. "tab is locked"
+	onSelection   func(selCount int, selSize int64, totalCount int, totalSize int64) // selection + whole-directory summary for the pane's status line
+	onCursorInfo  func(info string)                                                  // cursor row's name/size/modified (or item count for a dir)
+	onFocusGained func()                                                             // a row in this view was clicked; tell paneview to activate this pane
+	onOtherKey    func(*fyne.KeyEvent)                                               // a key the table itself doesn't handle, while it has focus — see keyTable
+	onContextMenu func(name string, pos fyne.Position)                               // right-click on a row; commander owns the popup (contextmenu_ui.go)
 
 	// onOpenArchivedMember is Enter/double-click on a file that's already
 	// inside an open archive (v.fs is a *zipfs.FS) — there's no real file at
@@ -1409,19 +1409,23 @@ func (v *fileListView) HasSelection() bool {
 }
 
 // reportSelection tells the pane's status line about both the explicit
-// multi-selection (count/size) and the cursor row's own info — called
-// whenever either changes.
+// multi-selection (count/size) and the whole directory's own total
+// (count/size), plus the cursor row's own info — called whenever either
+// changes. The whole-directory total is what the status line falls back to
+// showing whenever nothing is explicitly selected.
 func (v *fileListView) reportSelection() {
 	if v.onSelection != nil {
-		var count int
-		var total int64
+		var selCount, totalCount int
+		var selSize, totalSize int64
 		for _, e := range v.entries {
+			totalCount++
+			totalSize += e.Size
 			if v.state.Selected[e.Name] {
-				count++
-				total += e.Size
+				selCount++
+				selSize += e.Size
 			}
 		}
-		v.onSelection(count, total)
+		v.onSelection(selCount, selSize, totalCount, totalSize)
 	}
 	if v.onCursorInfo != nil {
 		v.onCursorInfo(v.cursorInfo())

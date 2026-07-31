@@ -7,6 +7,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -22,17 +23,41 @@ import (
 )
 
 // remoteConnFS marks a vfs.FileSystem backed by a live remote network
-// connection (SFTP, SMB — internal/vfs/sftpfs, internal/vfs/smbfs) as
-// opposed to an open archive or a listbox view, which also satisfy
-// swappableFS (filelist.go) but get their own, differently-worded blocks.
-// blockIfRemote and the Download/Upload-style transfer routing below use
-// this instead of a type-switch per backend, so adding a third connection
-// type later needs no changes here at all.
+// connection (SFTP, SMB, FileAgent — internal/vfs/sftpfs, internal/vfs/
+// smbfs, internal/vfs/fileagentfs) as opposed to an open archive or a
+// listbox view, which also satisfy swappableFS (filelist.go) but get their
+// own, differently-worded blocks. Every remote-aware operation in this file
+// (Copy/Move/Delete/Compress/Edit/Symlink/Favorites) type-asserts against
+// this instead of a type-switch per backend, so a fourth connection type
+// later needs no changes here at all.
 type remoteConnFS interface {
 	vfs.FileSystem
 	swappableFS
 	Download(sources []string, destDir string, progress fsops.ProgressFunc, resolve fsops.ConflictFunc) error
 	Upload(sources []string, destDir string, progress fsops.ProgressFunc, resolve fsops.ConflictFunc) error
+}
+
+// symlinkFS narrows remoteConnFS further to backends that can actually
+// create a symbolic link server-side — SFTP (a real SYMLINK op) and SMB
+// (via NTFS reparse points, best-effort — see smbfs.FS.Symlink's doc
+// comment). FileAgent has no wire op for this and isn't expected to grow
+// one (would mean changing the sibling FileMover project too), so
+// fileagentfs.FS deliberately has no Symlink method and never satisfies
+// this interface — createSymlink (contextmenu_ui.go) falls back to the
+// existing "not supported" message for it.
+type symlinkFS interface {
+	remoteConnFS
+	Symlink(target, linkPath string) error
+}
+
+// hasConnectionID is satisfied by any remoteConnFS backend that records
+// which saved connections.Connection it was opened from (sftpfs.FS,
+// smbfs.FS, fileagentfs.FS all implement it) — used by Add to Favorites to
+// capture that association without a type-switch per backend, so a
+// bookmarked path on a connection can be reconnected through later (see
+// favorites_ui.go's addFavorite/navigateFavorite).
+type hasConnectionID interface {
+	ConnectionID() string
 }
 
 func (c *commander) inactivePaneOf(p *pane) *pane {
@@ -79,19 +104,11 @@ func (c *commander) blockIfListbox(view *fileListView) bool {
 	return false
 }
 
-// blockIfRemote reports (and refuses) operations not wired up yet for a
-// remote connection (SFTP, SMB) — F4 Edit, Compress, Create Symbolic Link,
-// Multi-Rename Tool, Add to Favorites. Unlike blockIfListbox, this ISN'T
-// because there's no real "current directory" (a connection has a
-// perfectly real one — see F7 MkDir/Paste/drag-in, which DO work against
-// one). Each of these would need its own dedicated remote-aware plumbing
-// (F4: download, watch for external edits, re-upload on save; Compress:
-// download everything first, then zip; Create Symbolic Link: SFTP's own
-// SYMLINK op (SMB has no real equivalent), not fsops.Symlink's os.Symlink;
-// Multi-Rename: see blockIfRemoteMove's reasoning for why a batch op is a
-// bigger lift than a single one; Add to Favorites: the Favorites system has
-// no notion of "which saved connection to reconnect through" yet) that
-// isn't done in this first pass.
+// blockIfRemote reports (and refuses) an operation not wired up for a
+// remote connection at all — today just Create Symbolic Link against
+// FileAgent specifically (see symlinkFS; contextmenu_ui.go's createSymlink
+// checks that interface directly rather than calling this for every
+// remoteConnFS, so SFTP/SMB proceed while FileAgent still refuses cleanly).
 func (c *commander) blockIfRemote(view *fileListView) bool {
 	if _, ok := view.fs.(remoteConnFS); ok {
 		dialog.ShowInformation("Not Supported Yet", "This isn't supported yet for a remote connection.", c.win)
@@ -147,31 +164,63 @@ func (c *commander) doCopy() {
 		return
 	}
 
-	// A remote connection's presented paths aren't real local paths either
-	// — route through its own Download/Upload instead of fsops.Copy's raw
-	// os.* calls, exactly like the archive case above. Remote-to-different-
-	// remote isn't supported yet (Download assumes a real local
-	// destination, Upload a real local source) — copy to local first.
-	srcSF, srcRemote := view.fs.(remoteConnFS)
-	dstSF, dstRemote := dstView.fs.(remoteConnFS)
-	if srcRemote && dstRemote {
-		c.showStatus("copying directly between two remote connections isn't supported yet — copy to local first")
-		return
-	}
-	verb, op := "Copy", fsOpFunc(fsops.Copy)
-	switch {
-	case srcRemote:
-		verb, op = "Download", srcSF.Download
-	case dstRemote:
-		verb, op = "Upload", dstSF.Upload
-	}
-
+	verb, op := crossFSCopyOp(view, dstView)
 	showDialog(dialog.NewConfirm(verb, fmt.Sprintf("Copy %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 		if !ok {
 			return
 		}
 		c.runFileOp(verb+"ing", paths, target, op, src)
 	}, c.win))
+}
+
+// crossFSCopyOp decides how to move bytes from view's filesystem to
+// dstView's, as one fsOpFunc for runFileOp to drive — the single place F5
+// Copy and F6 Move both make this decision (see crossFSMoveOp), so a future
+// fourth combination only needs a change here. destDir passed to the
+// returned fsOpFunc must be one of dstView's own presented paths.
+func crossFSCopyOp(view, dstView *fileListView) (verb string, op fsOpFunc) {
+	srcSF, srcRemote := view.fs.(remoteConnFS)
+	dstSF, dstRemote := dstView.fs.(remoteConnFS)
+	switch {
+	case srcRemote && dstRemote:
+		return "Copy", crossConnCopy(srcSF, dstSF)
+	case srcRemote:
+		return "Download", srcSF.Download
+	case dstRemote:
+		return "Upload", dstSF.Upload
+	default:
+		return "Copy", fsops.Copy
+	}
+}
+
+// crossConnCopy stages a copy between two DIFFERENT remote connections
+// through a local temp directory — neither Download nor Upload accepts
+// another remoteConnFS as its other endpoint, so this is the one place that
+// bridges them, reusing both completely unchanged. Fits fsOpFunc exactly,
+// so it drops straight into runFileOp's existing progress/conflict
+// plumbing. Known, acceptable wrinkle: the progress bar restarts from 0
+// between the download and upload phases (no phase-weighting) — cosmetic
+// only, not worth the complexity of smoothing over.
+func crossConnCopy(srcSF, dstSF remoteConnFS) fsOpFunc {
+	return func(sources []string, destDir string, progress fsops.ProgressFunc, resolve fsops.ConflictFunc) error {
+		tmp, err := os.MkdirTemp("", "krankybear-xfer-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmp)
+		if err := srcSF.Download(sources, tmp, progress, resolve); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(tmp)
+		if err != nil {
+			return err
+		}
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = filepath.Join(tmp, e.Name())
+		}
+		return dstSF.Upload(names, destDir, progress, resolve)
+	}
 }
 
 // ── F6 Move / Rename ─────────────────────────────────────────────────────────
@@ -217,72 +266,96 @@ func (c *commander) doMoveOrRename() {
 	}
 
 	// Multi-item Move always targets the opposite pane's directory as one
-	// batch — decomposing that into the right mix of native rename /
-	// Download+Upload+delete for a remote connection, with its own
-	// progress/conflict handling, isn't done yet. F5 Copy already covers
-	// copying to/from a connection; the single-item dialog above (via
-	// performRename) covers a same-connection rename natively.
-	if c.blockIfRemoteMove(view, dstView) {
-		return
-	}
+	// batch — a pure local-local batch keeps using fsops.Move directly
+	// (unchanged); anything touching a remote connection on either side
+	// goes through crossFSMoveOp, the same transfer-then-delete-originals
+	// operation performRename's own cross-filesystem branch uses below.
 	target := dst.Path
+	_, srcRemote := view.fs.(remoteConnFS)
+	_, dstRemote := dstView.fs.(remoteConnFS)
+	op := fsOpFunc(fsops.Move)
+	if srcRemote || dstRemote {
+		op = c.crossFSMoveOp(view, dstView)
+	}
 	showDialog(dialog.NewConfirm("Move", fmt.Sprintf("Move %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 		if !ok {
 			return
 		}
-		c.runFileOp("Moving", paths, target, fsops.Move, src)
+		c.runFileOp("Moving", paths, target, op, src)
 	}, c.win))
 }
 
-// blockIfRemoteMove reports (and refuses) an F6 Move whenever either side
-// is a remote connection — see doMoveOrRename's doc comment above for what
-// IS supported instead.
-func (c *commander) blockIfRemoteMove(src, dst *fileListView) bool {
-	_, srcRemote := src.fs.(remoteConnFS)
-	_, dstRemote := dst.fs.(remoteConnFS)
-	if srcRemote || dstRemote {
-		dialog.ShowInformation("Not Supported Yet", "Moving multiple items to/from a remote connection isn't supported yet — try Copy (F5), then delete the originals.", c.win)
-		return true
+// crossFSMoveOp is crossFSCopyOp followed by removing the originals from
+// view's side, but only once the copy has fully succeeded — mirrors
+// fsops.Move's own local cross-device fallback (copy first, delete only
+// after). Used whenever a Move touches a remote connection on either side;
+// a pure local-local Move keeps using fsops.Move directly, unchanged.
+func (c *commander) crossFSMoveOp(view, dstView *fileListView) fsOpFunc {
+	_, copyOp := crossFSCopyOp(view, dstView)
+	return func(sources []string, destDir string, progress fsops.ProgressFunc, resolve fsops.ConflictFunc) error {
+		if err := copyOp(sources, destDir, progress, resolve); err != nil {
+			return err
+		}
+		if srcSF, ok := view.fs.(remoteConnFS); ok {
+			for _, p := range sources {
+				if err := srcSF.Remove(p); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		return fsops.Delete(sources, true) // permanent — matches fsops.Move's own os.RemoveAll fallback, no OS trash involved
 	}
-	return false
 }
 
 // performRename is the single-item Rename/Move dialog's OK handler.
 // oldPath/newPath are both already view/opposite-view's own presented
 // paths (see doMoveOrRename). A same-connection rename goes through that
-// connection's own native Rename; a cross-filesystem rename/move (crossing
-// into or out of a remote connection) isn't supported yet — same reasoning
-// as blockIfRemoteMove, just detected after the fact here since only
-// newPath's actual value (typed by the user) reveals whether it stayed on
-// the same connection or not.
+// connection's own native Rename; a genuinely cross-filesystem move (local
+// <-> a connection, or two different connections) is supported too, via
+// the same crossFSMoveOp multi-item Move uses — but only when newPath keeps
+// the SAME base name as oldPath (a plain "move to a different place," not
+// also a rename in the same step): Download/Upload/crossConnCopy all
+// preserve each source's own base name, the same limitation fsops.Copy/
+// Move already have for a purely local cross-device move, so renaming AND
+// crossing filesystems at once isn't supported here either.
 func (c *commander) performRename(view *fileListView, oldPath, newPath string, sourcePane *pane) {
-	if srcSF, ok := view.fs.(remoteConnFS); ok {
-		if !srcSF.IsInside(newPath) {
-			dialog.ShowInformation("Not Supported Yet", "Moving between a remote connection and somewhere else isn't supported yet — try Copy (F5), then delete the original.", c.win)
-			return
-		}
+	dstView := c.inactivePaneOf(sourcePane).activeView()
+	srcSF, srcRemote := view.fs.(remoteConnFS)
+	_, dstRemote := dstView.fs.(remoteConnFS)
+
+	if srcRemote && srcSF.IsInside(newPath) {
+		// Same connection — native Rename, no download/upload round trip.
 		if err := srcSF.Rename(oldPath, newPath); err != nil {
 			dialog.ShowError(err, c.win)
 			return
 		}
 		sourcePane.activeView().Reload()
-		c.inactivePaneOf(sourcePane).activeView().Reload()
-		return
-	}
-	if _, ok := c.inactivePaneOf(sourcePane).activeView().fs.(remoteConnFS); ok {
-		dialog.ShowInformation("Not Supported Yet", "Moving between a remote connection and somewhere else isn't supported yet — try Copy (F5), then delete the original.", c.win)
+		dstView.Reload()
 		return
 	}
 
-	if err := fsops.Rename(oldPath, newPath); err != nil {
-		// Likely a cross-device rename; fall back to copy+delete into the
-		// target directory (the MVP fallback keeps the original name — a
-		// simultaneous cross-device rename isn't supported here).
-		c.runFileOp("Moving", []string{oldPath}, filepath.Dir(newPath), fsops.Move, sourcePane)
+	if !srcRemote && !dstRemote {
+		if err := fsops.Rename(oldPath, newPath); err != nil {
+			// Likely a cross-device rename; fall back to copy+delete into
+			// the target directory (the MVP fallback keeps the original
+			// name — a simultaneous cross-device rename isn't supported).
+			c.runFileOp("Moving", []string{oldPath}, filepath.Dir(newPath), fsops.Move, sourcePane)
+			return
+		}
+		sourcePane.activeView().Reload()
+		dstView.Reload()
 		return
 	}
-	sourcePane.activeView().Reload()
-	c.inactivePaneOf(sourcePane).activeView().Reload()
+
+	// Genuinely cross-filesystem from here: local<->a connection, or two
+	// different connections.
+	if filepath.Base(oldPath) != filepath.Base(newPath) {
+		dialog.ShowInformation("Not Supported Yet", "Renaming AND moving to/from a remote connection in one step isn't supported yet — move first, then rename in place (or vice versa).", c.win)
+		return
+	}
+	destDir := dstView.fs.Dir(newPath)
+	c.runFileOp("Moving", []string{oldPath}, destDir, c.crossFSMoveOp(view, dstView), sourcePane)
 }
 
 // ── F7 MkDir ─────────────────────────────────────────────────────────────────

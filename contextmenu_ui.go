@@ -9,6 +9,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -84,10 +85,14 @@ func (c *commander) showRowContextMenu(p *pane, view *fileListView, name string,
 	)
 
 	if entry.IsDir {
+		connectionID := ""
+		if idFS, ok := view.fs.(hasConnectionID); ok {
+			connectionID = idFS.ConnectionID()
+		}
 		items = append(items,
 			fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem(`Add "`+entry.Name+`" to Favorites`, func() {
-				c.favorites.Add(entry.Name, fullPath)
+				c.favorites.Add(entry.Name, fullPath, connectionID)
 				c.saveFavorites()
 			}),
 		)
@@ -179,25 +184,60 @@ func (c *commander) compressMenuItems(view *fileListView, other *pane) []*fyne.M
 
 // compressSelection defaults to "alongside the source, no prompt" — fast,
 // and right nearly always where you'd want it — except from a listbox view
-// (see listboxfs), which has no real "alongside" for its entries to share:
-// there, it prompts for an explicit destination instead of just refusing,
-// defaulting to other (the opposite pane)'s current directory, the same
-// cross-pane convention F5/F6 already use.
+// (see listboxfs) or a remote connection, neither of which has a real
+// "alongside" for its entries to share (a listbox view has no single real
+// directory; a connection's archive would have to land somewhere real
+// anyway, and Compress never writes to a connection): there, it prompts for
+// an explicit destination instead of just refusing, defaulting to other
+// (the opposite pane)'s current directory, the same cross-pane convention
+// F5/F6 already use. A remote source downloads the selection to a temp dir
+// first (Download, same as F5 Copy's remote side), then compresses the
+// downloaded copies — no separate progress dialog for the download step,
+// matching Compress's existing dialog-free "just do it" feel rather than
+// introducing one only for this case.
 func (c *commander) compressSelection(view *fileListView, ext, sevenZipBin string, other *pane) {
-	if c.blockIfRemote(view) {
-		return
-	}
 	paths := view.SelectionOrCursor()
 	if len(paths) == 0 {
 		return
 	}
+	remoteSF, isRemote := view.fs.(remoteConnFS)
+
 	runCompress := func(dest string) {
 		go func() {
+			sources := paths
+			var tempDir string
+			if isRemote {
+				dir, err := os.MkdirTemp("", "krankybear-compress-*")
+				if err != nil {
+					fyne.Do(func() { dialog.ShowError(err, c.win) })
+					return
+				}
+				tempDir = dir
+				if err := remoteSF.Download(paths, tempDir, nil, nil); err != nil {
+					os.RemoveAll(tempDir)
+					fyne.Do(func() { dialog.ShowError(err, c.win) })
+					return
+				}
+				entries, err := os.ReadDir(tempDir)
+				if err != nil {
+					os.RemoveAll(tempDir)
+					fyne.Do(func() { dialog.ShowError(err, c.win) })
+					return
+				}
+				sources = make([]string, len(entries))
+				for i, e := range entries {
+					sources[i] = filepath.Join(tempDir, e.Name())
+				}
+			}
+
 			var err error
 			if ext == "7z" {
-				err = fsops.CompressSevenZip(sevenZipBin, paths, dest)
+				err = fsops.CompressSevenZip(sevenZipBin, sources, dest)
 			} else {
-				err = fsops.Compress(paths, dest)
+				err = fsops.Compress(sources, dest)
+			}
+			if tempDir != "" {
+				os.RemoveAll(tempDir)
 			}
 			fyne.Do(func() {
 				if err != nil {
@@ -208,7 +248,7 @@ func (c *commander) compressSelection(view *fileListView, ext, sevenZipBin strin
 		}()
 	}
 
-	if _, ok := view.fs.(*listboxfs.FS); ok {
+	if _, ok := view.fs.(*listboxfs.FS); ok || isRemote {
 		destDir := ""
 		if other != nil {
 			if st := other.activeState(); st != nil {
@@ -239,11 +279,31 @@ func (c *commander) compressSelection(view *fileListView, ext, sevenZipBin strin
 // (not the opposite pane — a symlink is meant to sit next to what it points
 // at, unlike Copy/Move). The default name is pre-selected so retyping it is
 // a single keystroke, same convention as F7 MkDir's prefill.
+//
+// Against a remote connection this only works for SFTP/SMB (symlinkFS —
+// SFTP has a real SYMLINK op; SMB's is best-effort via NTFS reparse points,
+// may fail against a Samba-backed share) — FileAgent has no such op and
+// stays blocked via blockIfRemote, same as before this existed at all.
 func (c *commander) createSymlink(view *fileListView, sourcePath string, other *pane) {
-	if c.blockIfListbox(view) || c.blockIfRemote(view) {
+	if c.blockIfListbox(view) {
 		return
 	}
-	defaultPath := fsops.SymlinkName(view.CurrentPath(), filepath.Base(sourcePath))
+	symFS, remoteSymlinkable := view.fs.(symlinkFS)
+	if !remoteSymlinkable && c.blockIfRemote(view) {
+		return
+	}
+	var defaultPath string
+	if remoteSymlinkable {
+		// fsops.SymlinkName's os.Lstat-based collision loop assumes a real
+		// local path — not safe against a presented "scheme://host/..."
+		// path, so a remote default just takes the plain suggested name
+		// with no collision check; the user can retype it if it happens to
+		// collide (the create attempt below will fail with a clear error
+		// either way, same as any other name conflict would).
+		defaultPath = view.fs.Join(view.CurrentPath(), "link-"+filepath.Base(sourcePath))
+	} else {
+		defaultPath = fsops.SymlinkName(view.CurrentPath(), filepath.Base(sourcePath))
+	}
 	nameEntry := newDialogEntry()
 	nameEntry.SetText(defaultPath)
 	content := container.NewVBox(widget.NewLabel("Create symbolic link at:"), nameEntry)
@@ -251,7 +311,13 @@ func (c *commander) createSymlink(view *fileListView, sourcePath string, other *
 		if !ok || strings.TrimSpace(nameEntry.Text) == "" {
 			return
 		}
-		if err := fsops.Symlink(sourcePath, nameEntry.Text); err != nil {
+		var err error
+		if remoteSymlinkable {
+			err = symFS.Symlink(sourcePath, nameEntry.Text)
+		} else {
+			err = fsops.Symlink(sourcePath, nameEntry.Text)
+		}
+		if err != nil {
 			dialog.ShowError(err, c.win)
 			return
 		}

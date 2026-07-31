@@ -133,6 +133,18 @@ func (cfg *Config) Remove(id string) {
 	cfg.Connections = out
 }
 
+// FindByID returns the connection with the given id, if still saved — used
+// by Favorites to reconnect through a saved connection before jumping to a
+// bookmarked path within it (see favorites_ui.go's navigateFavorite).
+func (cfg Config) FindByID(id string) (Connection, bool) {
+	for _, c := range cfg.Connections {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return Connection{}, false
+}
+
 // Upsert adds conn, or replaces the existing entry with the same ID.
 func (cfg *Config) Upsert(conn Connection) {
 	for i, c := range cfg.Connections {

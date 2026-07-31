@@ -61,6 +61,18 @@ func TestRemoveDropsOnlyMatchingID(t *testing.T) {
 	}
 }
 
+func TestFindByIDFindsExistingAndReportsMissing(t *testing.T) {
+	cfg := Config{Connections: []Connection{{ID: "a", Name: "First"}, {ID: "b", Name: "Second"}}}
+
+	got, ok := cfg.FindByID("b")
+	if !ok || got.Name != "Second" {
+		t.Fatalf("FindByID(b) = %+v, %v; want Second, true", got, ok)
+	}
+	if _, ok := cfg.FindByID("missing"); ok {
+		t.Fatal("FindByID for an unknown id should report not-found")
+	}
+}
+
 func TestNewIDIsUniqueAndNonEmpty(t *testing.T) {
 	a, b := NewID(), NewID()
 	if a == "" || b == "" {

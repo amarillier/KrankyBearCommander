@@ -44,7 +44,17 @@ type FS struct {
 	// RemotePath at Connect time — StartPath() turns it into this
 	// connection's own starting presented path.
 	startPath string
+	// connectionID is the saved connections.Connection.ID this FS was opened
+	// from (see Connect) — read back via ConnectionID() by the Connections
+	// manager UI (Add to Favorites) to know which saved connection to
+	// reconnect through later, without any presented-path prefix-matching
+	// guesswork.
+	connectionID string
 }
+
+// ConnectionID returns the saved connections.Connection.ID this FS was
+// opened from — see the connectionID field's doc comment.
+func (fs *FS) ConnectionID() string { return fs.connectionID }
 
 func addr(host string, port int) string {
 	if port == 0 {
@@ -117,11 +127,12 @@ func Connect(conn *connections.Connection, secret string) (*FS, error) {
 	}
 
 	return &FS{
-		netConn:   netConn,
-		session:   session,
-		share:     smbShare,
-		prefix:    fmt.Sprintf("smb://%s@%s/%s", conn.Username, a, share),
-		startPath: withinShare,
+		netConn:      netConn,
+		session:      session,
+		share:        smbShare,
+		prefix:       fmt.Sprintf("smb://%s@%s/%s", conn.Username, a, share),
+		startPath:    withinShare,
+		connectionID: conn.ID,
 	}, nil
 }
 
@@ -213,6 +224,19 @@ func (fs *FS) Remove(p string) error {
 
 func (fs *FS) Rename(oldPath, newPath string) error {
 	return fs.share.Rename(fs.shareRelative(oldPath), fs.shareRelative(newPath))
+}
+
+// Symlink creates a symbolic link at linkPath pointing to target (both
+// presented paths on this share) via go-smb2's own Share.Symlink, itself
+// implemented through NTFS reparse points (FSCTL_SET_REPARSE_POINT) — real
+// and callable against any share, but per go-smb2's own doc comment only
+// reliably works against a genuine Windows or macOS SMB server; Samba
+// doesn't support reparse points well, so this is best-effort against a
+// Samba-backed share and surfaces whatever error go-smb2 returns rather
+// than trying to detect/preempt that case (see contextmenu_ui.go's
+// createSymlink for how the resulting error reaches the user).
+func (fs *FS) Symlink(target, linkPath string) error {
+	return fs.share.Symlink(fs.shareRelative(target), fs.shareRelative(linkPath))
 }
 
 // Join concatenates presented paths — deliberately NOT delegated to

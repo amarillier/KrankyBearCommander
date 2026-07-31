@@ -53,6 +53,8 @@ type pane struct {
 	lastCursorInfo string
 	lastSelCount   int
 	lastSelSize    int64
+	lastTotalCount int
+	lastTotalSize  int64
 
 	root fyne.CanvasObject
 }
@@ -204,7 +206,9 @@ func (p *pane) bindView(view *fileListView) {
 	view.onNavigated = func() { p.refreshChrome() }
 	view.onStatus = p.onStatus
 	view.onFocusGained = p.onActivated
-	view.onSelection = func(count int, size int64) { p.updateStatusLine(count, size) }
+	view.onSelection = func(selCount int, selSize int64, totalCount int, totalSize int64) {
+		p.updateStatusLine(selCount, selSize, totalCount, totalSize)
+	}
 	view.onCursorInfo = func(info string) { p.lastCursorInfo = info; p.renderStatusLine() }
 	view.onOtherKey = p.onOtherKey
 	view.onContextMenu = func(name string, pos fyne.Position) {
@@ -470,6 +474,7 @@ func (p *pane) refreshChrome() {
 	// or re-selected, does so via onCursorInfo/onSelection).
 	p.lastCursorInfo = state.Path
 	p.lastSelCount, p.lastSelSize = 0, 0
+	p.lastTotalCount, p.lastTotalSize = 0, 0
 	p.renderStatusLine()
 }
 
@@ -516,18 +521,24 @@ func (p *pane) ensureAtLeastOneTab() {
 	p.refreshChrome()
 }
 
-func (p *pane) updateStatusLine(count int, size int64) {
-	p.lastSelCount, p.lastSelSize = count, size
+func (p *pane) updateStatusLine(selCount int, selSize int64, totalCount int, totalSize int64) {
+	p.lastSelCount, p.lastSelSize = selCount, selSize
+	p.lastTotalCount, p.lastTotalSize = totalCount, totalSize
 	p.renderStatusLine()
 }
 
 // renderStatusLine combines the cursor row's info (name + size/modified, or
 // item count for a directory — see fileListView.cursorInfo) with a
-// "[N selected, size]" suffix whenever there's an explicit multi-selection.
+// "[N selected, size]" suffix whenever there's an explicit multi-selection,
+// or otherwise "[N item(s), size]" for the whole current directory — so the
+// suffix always shows something useful, reverting to the directory total
+// the moment the selection is cleared.
 func (p *pane) renderStatusLine() {
 	text := p.lastCursorInfo
 	if p.lastSelCount > 0 {
 		text = fmt.Sprintf("%s   [%d selected, %s]", text, p.lastSelCount, humanSize(p.lastSelSize))
+	} else {
+		text = fmt.Sprintf("%s   [%d item(s), %s]", text, p.lastTotalCount, humanSize(p.lastTotalSize))
 	}
 	p.statusLabel.SetText(text)
 }

@@ -15,8 +15,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
-	"commander/internal/fsops"
 	"commander/internal/rename"
+	"commander/internal/vfs"
 )
 
 var multiRenameCaseOptions = []string{"No Change", "UPPERCASE", "lowercase", "Title Case", "Sentence case"}
@@ -62,14 +62,17 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 	if view == nil {
 		return
 	}
-	// blockIfListbox here specifically: a listbox's entries can each be in a
+	// blockIfListbox specifically: a listbox's entries can each be in a
 	// completely different real directory, but applyMultiRename's
 	// same-batch-collision temp-rename pass assumes one shared dir for
 	// everything being renamed — not worth the complexity for a batch tool
 	// against what's fundamentally a single-item-at-a-time search-results
-	// view (inline rename, rename_ui.go, handles that case correctly).
-	// blockIfRemote for the same reason against a remote SFTP connection.
-	if c.blockIfArchive(view) || c.blockIfListbox(view) || c.blockIfRemote(view) {
+	// view (inline rename, rename_ui.go, handles that case correctly). A
+	// remote connection's current directory IS one real shared directory
+	// (same assumption as local), so it needs no equivalent block — see
+	// applyMultiRename, which already routes every actual filesystem call
+	// through view.fs rather than raw os.* calls.
+	if c.blockIfArchive(view) || c.blockIfListbox(view) {
 		return
 	}
 	names := view.SelectionOrCursorNames()
@@ -169,7 +172,7 @@ func (c *commander) showMultiRenameToolFor(view *fileListView) {
 			dialog.ShowError(err, c.win)
 			return
 		}
-		if err := applyMultiRename(view.fs.Join, dir, names, out); err != nil {
+		if err := applyMultiRename(view.fs, dir, names, out); err != nil {
 			dialog.ShowError(err, c.win)
 		} else {
 			// Selection is tracked by name, so a renamed file silently
@@ -209,12 +212,15 @@ func multiRenameDialogSize(win fyne.Window) fyne.Size {
 // same-batch collisions/permutations (e.g. swapping two files' names, or
 // shifting a whole sequence) can never clobber each other, without needing
 // a per-item conflict dialog for what's meant to be one bulk operation.
-// join is the view's own vfs.FileSystem.Join, not filepath.Join directly —
-// dir is only ever a real, directly-usable directory for the local backend;
-// a listbox view's dir is a synthetic label whose entries can each be a real
-// file in a completely different real directory (see listboxfs.FS.Join),
-// which only the view's own Join knows how to resolve correctly.
-func applyMultiRename(join func(...string) string, dir string, oldNames, newNames []string) error {
+// fs is the view's own vfs.FileSystem — every existence check and the actual
+// renames go through it (Join/Stat/Rename) rather than raw os.* calls, so
+// this works identically for local, listbox, and any remote connection
+// (SFTP/SMB/FileAgent) alike; dir is only ever a real, directly-usable
+// directory for the local backend, a listbox view's dir is a synthetic
+// label whose entries can each be a real file in a completely different
+// real directory (see listboxfs.FS.Join), which only fs's own Join knows
+// how to resolve correctly.
+func applyMultiRename(fs vfs.FileSystem, dir string, oldNames, newNames []string) error {
 	// Case-insensitive: macOS (APFS) and Windows (NTFS) both default to
 	// case-insensitive filesystems, so a rename that only changes case
 	// (e.g. fixing "80s" that got wrongly title-cased to "80S" — a real
@@ -249,7 +255,7 @@ func applyMultiRename(join func(...string) string, dir string, oldNames, newName
 		if oldSet[strings.ToLower(newName)] {
 			continue // part of this batch — safe via the temp-name pass below
 		}
-		if _, err := os.Lstat(join(dir, newName)); err == nil {
+		if _, err := fs.Stat(fs.Join(dir, newName)); err == nil {
 			return fmt.Errorf("%q already exists", newName)
 		}
 	}
@@ -260,7 +266,7 @@ func applyMultiRename(join func(...string) string, dir string, oldNames, newName
 			continue
 		}
 		tmp := fmt.Sprintf(".kbc-rename-tmp-%d-%d", os.Getpid(), i)
-		if err := fsops.Rename(join(dir, old), join(dir, tmp)); err != nil {
+		if err := fs.Rename(fs.Join(dir, old), fs.Join(dir, tmp)); err != nil {
 			return fmt.Errorf("renaming %q: %w", old, err)
 		}
 		temps[i] = tmp
@@ -269,7 +275,7 @@ func applyMultiRename(join func(...string) string, dir string, oldNames, newName
 		if oldNames[i] == newName {
 			continue
 		}
-		if err := fsops.Rename(join(dir, temps[i]), join(dir, newName)); err != nil {
+		if err := fs.Rename(fs.Join(dir, temps[i]), fs.Join(dir, newName)); err != nil {
 			return fmt.Errorf("renaming to %q: %w", newName, err)
 		}
 	}

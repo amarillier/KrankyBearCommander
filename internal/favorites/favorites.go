@@ -15,6 +15,12 @@ import (
 type Entry struct {
 	Label string `json:"label"` // shown in the Favorites menu; defaults to the path's last component
 	Path  string `json:"path"`
+	// ConnectionID, if set, is the saved connections.Connection.ID this
+	// favorite's Path belongs to — clicking it needs to reconnect through
+	// that saved connection first (opening a fresh tab), rather than just
+	// JumpTo-ing Path directly the way a local favorite does (see
+	// favorites_ui.go's navigatePane). Empty for an ordinary local favorite.
+	ConnectionID string `json:"connectionId,omitempty"`
 }
 
 // List is the persisted set of favorites.
@@ -61,29 +67,32 @@ func Save(path string, l List) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
-// Has reports whether path is already favorited.
-func (l List) Has(path string) bool {
+// Has reports whether (path, connectionID) is already favorited — both
+// together, not path alone, since two different connections can legitimately
+// share the same presented-path shape (e.g. both rooted at "/").
+func (l List) Has(path, connectionID string) bool {
 	for _, e := range l.Entries {
-		if e.Path == path {
+		if e.Path == path && e.ConnectionID == connectionID {
 			return true
 		}
 	}
 	return false
 }
 
-// Add appends a favorite, doing nothing if path is already present.
-func (l *List) Add(label, path string) {
-	if l.Has(path) {
+// Add appends a favorite, doing nothing if (path, connectionID) is already
+// present. connectionID is "" for an ordinary local favorite.
+func (l *List) Add(label, path, connectionID string) {
+	if l.Has(path, connectionID) {
 		return
 	}
-	l.Entries = append(l.Entries, Entry{Label: label, Path: path})
+	l.Entries = append(l.Entries, Entry{Label: label, Path: path, ConnectionID: connectionID})
 }
 
-// Remove drops path from the list, if present.
-func (l *List) Remove(path string) {
+// Remove drops (path, connectionID) from the list, if present.
+func (l *List) Remove(path, connectionID string) {
 	out := l.Entries[:0]
 	for _, e := range l.Entries {
-		if e.Path != path {
+		if e.Path != path || e.ConnectionID != connectionID {
 			out = append(out, e)
 		}
 	}

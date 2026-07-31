@@ -4,6 +4,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"fyne.io/fyne/v2"
@@ -49,7 +50,7 @@ func (c *commander) seedDefaultFavorites() {
 	}
 	for _, cand := range favorites.DefaultSeedCandidates(home) {
 		if info, err := os.Stat(cand.Path); err == nil && info.IsDir() {
-			c.favorites.Add(cand.Label, cand.Path)
+			c.favorites.Add(cand.Label, cand.Path, "")
 		}
 	}
 }
@@ -59,10 +60,10 @@ func (c *commander) seedDefaultFavorites() {
 // removed — only Home gets this one-time (idempotent) backfill.
 func (c *commander) ensureHomeFavorite() {
 	home, err := c.fs.HomeDir()
-	if err != nil || home == "" || c.favorites.Has(home) {
+	if err != nil || home == "" || c.favorites.Has(home, "") {
 		return
 	}
-	c.favorites.Add("Home", home)
+	c.favorites.Add("Home", home, "")
 	c.saveFavorites()
 }
 
@@ -78,33 +79,68 @@ func (c *commander) saveFavorites() {
 // pick is an explicit destination, not casual in-pane browsing, so it works
 // even on a fully locked tab and never redefines that tab's locked root
 // (Home afterward still returns to wherever it was locked before the jump).
+// Only for a plain local path — Roots/Volumes are always local; a
+// connection-backed favorite goes through navigateFavorite instead, since
+// JumpTo alone has no way to reconnect a tab that isn't already on the
+// right connection (or isn't connected to anything at all).
 func (c *commander) navigatePane(p *pane, path string) {
 	if v := p.activeView(); v != nil {
 		v.JumpTo(path)
 	}
 }
 
-// addFavorite bookmarks p's active tab's current directory.
+// navigateFavorite is a Favorites-menu click. A plain local favorite
+// (ConnectionID == "") is just navigatePane. One saved against a remote
+// connection reconnects first — connectTo opens a fresh tab in p (exactly
+// like Connecting from the Connections manager itself), then jumps within
+// THAT new tab's own fs to entry.Path once it's actually open, rather than
+// trying to JumpTo on p's current (unrelated, or not-yet-connected) tab.
+func (c *commander) navigateFavorite(p *pane, entry favorites.Entry) {
+	if entry.ConnectionID == "" {
+		c.navigatePane(p, entry.Path)
+		return
+	}
+	conn, ok := c.connectionConfig.FindByID(entry.ConnectionID)
+	if !ok {
+		dialog.ShowError(fmt.Errorf("the saved connection for %q no longer exists", entry.Label), c.win)
+		return
+	}
+	target := entry.Path
+	c.connectTo(conn, p, func() {
+		if v := p.activeView(); v != nil {
+			v.JumpTo(target)
+		}
+	}, func(err error) {
+		dialog.ShowError(fmt.Errorf("connect to %s: %w", conn.Host, err), c.win)
+	})
+}
+
+// addFavorite bookmarks p's active tab's current directory. Against a
+// remote connection, capturing which saved connection this fs came from
+// (via hasConnectionID) is what makes the favorite re-navigable later (see
+// navigateFavorite) — the connection itself must still exist by then.
 func (c *commander) addFavorite(p *pane) {
 	state := p.activeState()
 	if state == nil {
 		return
 	}
+	view := p.activeView()
 	// A listbox view's Path is a synthetic label, not a real, later
 	// re-navigable directory — bookmarking it would produce a Favorite that
 	// fails (or, worse, silently resolves to nothing useful) the moment
-	// it's actually clicked. A remote connection's presented path IS real
-	// and re-navigable, but Favorites has no notion yet of "which saved
-	// connection to reconnect through first" — deferred alongside the other
-	// blockIfRemote-guarded operations.
-	if c.blockIfListbox(p.activeView()) || c.blockIfRemote(p.activeView()) {
+	// it's actually clicked.
+	if c.blockIfListbox(view) {
 		return
+	}
+	connectionID := ""
+	if idFS, ok := view.fs.(hasConnectionID); ok {
+		connectionID = idFS.ConnectionID()
 	}
 	label := lastPathComponent(state.Path)
 	if label == "" {
 		label = state.Path
 	}
-	c.favorites.Add(label, state.Path)
+	c.favorites.Add(label, state.Path, connectionID)
 	c.saveFavorites()
 }
 
@@ -135,23 +171,27 @@ func (c *commander) showFavoritesMenu(p *pane) {
 		items = append(items, fyne.NewMenuItem("(no favorites yet)", func() {}))
 	}
 	for _, e := range c.favorites.Entries {
-		path, label := e.Path, e.Label
-		items = append(items, fyne.NewMenuItem(label, func() { c.navigatePane(p, path) }))
+		entry := e
+		items = append(items, fyne.NewMenuItem(entry.Label, func() { c.navigateFavorite(p, entry) }))
 	}
 	items = append(items,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Add Current Directory…", func() { c.addFavorite(p) }),
-		fyne.NewMenuItem("Manage Favorites…", func() { c.showManageFavorites() }),
+		fyne.NewMenuItem("Manage Favorites…", func() { c.showManageFavorites(p) }),
 	)
 
 	menu := fyne.NewMenu("Favorites", items...)
 	widget.NewPopUpMenu(menu, c.win.Canvas()).ShowAtPosition(c.favoritesMenuPos(p))
 }
 
-// showManageFavorites lists every favorite with a Remove button — the only
-// way to drop one, short of re-adding over it (Add de-duplicates by path).
-func (c *commander) showManageFavorites() {
+// showManageFavorites lists every favorite with a Remove button — clicking
+// a row's label selects/highlights it (same convention as showConnections'
+// list), and double-clicking it opens it in p, closing this dialog, exactly
+// as if you'd picked it from the Favorites menu directly.
+func (c *commander) showManageFavorites(p *pane) {
 	list := container.NewVBox()
+	var d dialog.Dialog
+	var selectedKey string // path+"\x00"+connectionID of the highlighted row, "" if none
 
 	var refresh func()
 	refresh = func() {
@@ -160,13 +200,29 @@ func (c *commander) showManageFavorites() {
 			rows = append(rows, widget.NewLabel(`No favorites yet — use "Add Current Directory…" from the Favorites menu.`))
 		}
 		for _, e := range c.favorites.Entries {
-			path := e.Path
+			entry := e
+			key := entry.Path + "\x00" + entry.ConnectionID
 			removeBtn := widget.NewButton("Remove", func() {
-				c.favorites.Remove(path)
+				c.favorites.Remove(entry.Path, entry.ConnectionID)
 				c.saveFavorites()
 				refresh()
 			})
-			row := container.NewBorder(nil, nil, nil, removeBtn, widget.NewLabel(e.Label+"  —  "+e.Path))
+			labelText := entry.Label + "  —  " + entry.Path
+			if entry.ConnectionID != "" {
+				if conn, ok := c.connectionConfig.FindByID(entry.ConnectionID); ok {
+					labelText = entry.Label + "  —  " + conn.Name + ": " + entry.Path
+				} else {
+					labelText = entry.Label + "  —  " + entry.Path + "  (saved connection no longer exists)"
+				}
+			}
+			label := newDoubleTappableLabel(labelText,
+				func() { selectedKey = key; refresh() },
+				func() { c.navigateFavorite(p, entry); d.Hide() },
+			)
+			if key == selectedKey {
+				label.Importance = widget.HighImportance
+			}
+			row := container.NewBorder(nil, nil, nil, removeBtn, label)
 			rows = append(rows, row)
 		}
 		list.Objects = rows
@@ -174,9 +230,42 @@ func (c *commander) showManageFavorites() {
 	}
 	refresh()
 
-	d := dialog.NewCustom("Manage Favorites", "Close", container.NewVScroll(list), c.win)
+	d = dialog.NewCustom("Manage Favorites", "Close", container.NewVScroll(list), c.win)
 	d.Resize(fyne.NewSize(480, 400))
 	showDialog(d)
+}
+
+// doubleTappableLabel is a widget.Label reporting both a single tap
+// (select/highlight) and a double-tap (open) — used by showManageFavorites.
+// Deliberately its own type rather than adding DoubleTapped to connections_
+// ui.go's tappableLabel: Fyne's driver delays EVERY single Tapped by the
+// double-tap threshold once a widget implements DoubleTappable at all, even
+// for an instance with nothing to do on a double-tap — giving Connections
+// manager's existing single-tap-to-highlight rows that same lag would be an
+// unwanted regression there.
+type doubleTappableLabel struct {
+	widget.Label
+	onTap       func()
+	onDoubleTap func()
+}
+
+func newDoubleTappableLabel(text string, onTap, onDoubleTap func()) *doubleTappableLabel {
+	l := &doubleTappableLabel{onTap: onTap, onDoubleTap: onDoubleTap}
+	l.Text = text
+	l.ExtendBaseWidget(l)
+	return l
+}
+
+func (l *doubleTappableLabel) Tapped(*fyne.PointEvent) {
+	if l.onTap != nil {
+		l.onTap()
+	}
+}
+
+func (l *doubleTappableLabel) DoubleTapped(*fyne.PointEvent) {
+	if l.onDoubleTap != nil {
+		l.onDoubleTap()
+	}
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

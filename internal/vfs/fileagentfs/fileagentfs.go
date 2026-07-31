@@ -62,7 +62,17 @@ type FS struct {
 	mu     sync.Mutex
 	conn   *tls.Conn
 	prefix string // "fileagent://host:port" — no trailing slash
+	// connectionID is the saved connections.Connection.ID this FS was opened
+	// from (see Connect) — read back via ConnectionID() by the Connections
+	// manager UI (Add to Favorites) to know which saved connection to
+	// reconnect through later, without any presented-path prefix-matching
+	// guesswork.
+	connectionID string
 }
+
+// ConnectionID returns the saved connections.Connection.ID this FS was
+// opened from — see the connectionID field's doc comment.
+func (fs *FS) ConnectionID() string { return fs.connectionID }
 
 func normalizePin(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
@@ -162,7 +172,7 @@ func Connect(conn *connections.Connection, secret string) (*FS, error) {
 		return nil, fmt.Errorf("unexpected auth response: %s", resp.Op)
 	}
 
-	return &FS{conn: tlsConn, prefix: "fileagent://" + a}, nil
+	return &FS{conn: tlsConn, prefix: "fileagent://" + a, connectionID: conn.ID}, nil
 }
 
 // Presented returns virtual (this connection's own starting path, or any

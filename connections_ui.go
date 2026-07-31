@@ -100,10 +100,19 @@ func (c *commander) showConnections(target *pane) {
 		for _, conn := range c.connectionConfig.Connections {
 			id := conn.ID
 			connectBtn := widget.NewButton("Connect", func() {
-				c.connectTo(conn, target, func() { d.Hide() })
+				c.connectTo(conn, target, func() { d.Hide() }, func(err error) {
+					// A failed connect very often means saved credentials
+					// have gone stale (e.g. a FileAgent listener that was
+					// restarted, generating a new PSK/TLS pin) — go straight
+					// to editing this connection, with the error shown right
+					// there, instead of a dead-end error dialog the user
+					// would then have to close before finding Edit
+					// themselves.
+					c.showConnectionForm(&conn, err.Error(), refresh)
+				})
 			})
 			editBtn := widget.NewButton("Edit", func() {
-				c.showConnectionForm(&conn, refresh)
+				c.showConnectionForm(&conn, "", refresh)
 			})
 			removeBtn := widget.NewButton("Remove", func() {
 				c.connectionConfig.Remove(conn.ID)
@@ -140,7 +149,7 @@ func (c *commander) showConnections(target *pane) {
 	refresh()
 
 	addBtn := widget.NewButton("Add Connection…", func() {
-		c.showConnectionForm(nil, refresh)
+		c.showConnectionForm(nil, "", refresh)
 	})
 
 	content := container.NewBorder(nil, addBtn, nil, nil, container.NewVScroll(list))
@@ -155,7 +164,14 @@ func (c *commander) showConnections(target *pane) {
 // change. The secret field is always blank on open (never pre-filled from
 // the keychain, even when editing) — left blank on Save, an existing
 // connection's stored secret is kept as-is rather than cleared.
-func (c *commander) showConnectionForm(existing *connections.Connection, onSaved func()) {
+//
+// errMsg, if non-empty, shows as a banner at the top of the form instead of
+// a separate error dialog — used when a Connect attempt just failed (see
+// showConnections' connectBtn) so the likely fix (edit the stale
+// password/passphrase/pre-shared-key/pin) is right there instead of behind
+// a second "now go click Edit yourself" step. A plain Add/Edit from the
+// list itself always passes "".
+func (c *commander) showConnectionForm(existing *connections.Connection, errMsg string, onSaved func()) {
 	nameEntry := newDialogEntry()
 	nameEntry.SetPlaceHolder("Name (e.g. Home Server)")
 	hostEntry := newDialogEntry()
@@ -261,7 +277,7 @@ func (c *commander) showConnectionForm(existing *connections.Connection, onSaved
 	protocolSelect.SetSelected(display)
 	applyProtocol(display) // SetSelected only fires OnChanged if the value actually changes
 
-	content := container.NewVBox(
+	fields := []fyne.CanvasObject{
 		container.NewGridWithColumns(2, widget.NewLabel("Name:"), nameEntry),
 		container.NewGridWithColumns(2, widget.NewLabel("Protocol:"), protocolSelect),
 		container.NewGridWithColumns(2, widget.NewLabel("Host:"), hostEntry),
@@ -272,7 +288,14 @@ func (c *commander) showConnectionForm(existing *connections.Connection, onSaved
 		domainRow,
 		tlsPinRow,
 		container.NewGridWithColumns(2, widget.NewLabel("Password / Passphrase:"), secretEntry),
-	)
+	}
+	if errMsg != "" {
+		warning := widget.NewLabel("Connect failed: " + errMsg)
+		warning.Wrapping = fyne.TextWrapWord
+		warning.Importance = widget.DangerImportance
+		fields = append([]fyne.CanvasObject{warning, widget.NewSeparator()}, fields...)
+	}
+	content := container.NewVBox(fields...)
 
 	d := dialog.NewCustomConfirm(title, "Save", "Cancel", content, func(ok bool) {
 		if !ok {
@@ -327,16 +350,19 @@ func (c *commander) showConnectionForm(existing *connections.Connection, onSaved
 // connectTo dispatches to this connection's own protocol. onConnected fires
 // once the new tab is actually open (e.g. hiding showConnections' list
 // dialog, so it's obvious something happened rather than just sitting
-// there unchanged).
-func (c *commander) connectTo(conn connections.Connection, target *pane, onConnected func()) {
+// there unchanged). onFailed fires instead of a bare error dialog on any
+// failure — see showConnections' connectBtn, which uses it to jump straight
+// to editing this connection with the error shown inline (stale saved
+// credentials being the single most common cause of a failed connect).
+func (c *commander) connectTo(conn connections.Connection, target *pane, onConnected func(), onFailed func(error)) {
 	secret, _ := connections.GetSecret(conn.ID)
 	switch conn.Protocol {
 	case "smb":
-		c.connectSMB(&conn, secret, target, onConnected)
+		c.connectSMB(&conn, secret, target, onConnected, onFailed)
 	case "fileagent":
-		c.connectFileAgent(&conn, secret, target, onConnected)
+		c.connectFileAgent(&conn, secret, target, onConnected, onFailed)
 	default:
-		c.connectSFTP(&conn, secret, target, onConnected)
+		c.connectSFTP(&conn, secret, target, onConnected, onFailed)
 	}
 }
 
@@ -347,18 +373,18 @@ func (c *commander) connectTo(conn connections.Connection, target *pane, onConne
 // ssh library's own synchronous handshake callback. SMB has no equivalent
 // step (see connectSMB) — NTLM auth has no host-identity primitive at this
 // level the way SSH's host keys do.
-func (c *commander) connectSFTP(conn *connections.Connection, secret string, target *pane, onConnected func()) {
+func (c *commander) connectSFTP(conn *connections.Connection, secret string, target *pane, onConnected func(), onFailed func(error)) {
 	go func() {
 		fingerprint, err := sftpfs.ProbeHostKey(conn.Host, conn.Port)
 		if err != nil {
-			fyne.Do(func() { dialog.ShowError(fmt.Errorf("connect to %s: %w", conn.Host, err), c.win) })
+			fyne.Do(func() { onFailed(fmt.Errorf("connect to %s: %w", conn.Host, err)) })
 			return
 		}
 		if fingerprint == conn.TrustedHostKeyFingerprint {
-			c.finishSFTPConnect(conn, secret, target, onConnected)
+			c.finishSFTPConnect(conn, secret, target, onConnected, onFailed)
 			return
 		}
-		fyne.Do(func() { c.showHostKeyTrustPrompt(conn, secret, fingerprint, target, onConnected) })
+		fyne.Do(func() { c.showHostKeyTrustPrompt(conn, secret, fingerprint, target, onConnected, onFailed) })
 	}()
 }
 
@@ -368,7 +394,7 @@ func (c *commander) connectSFTP(conn *connections.Connection, secret string, tar
 // trust, worded more alarmingly since that case could mean a real
 // man-in-the-middle rather than just "haven't connected before." Accepting
 // persists the fingerprint before connecting.
-func (c *commander) showHostKeyTrustPrompt(conn *connections.Connection, secret, fingerprint string, target *pane, onConnected func()) {
+func (c *commander) showHostKeyTrustPrompt(conn *connections.Connection, secret, fingerprint string, target *pane, onConnected func(), onFailed func(error)) {
 	title := "New Host Key"
 	msg := fmt.Sprintf("%s (%s) presents a host key you haven't trusted before:\n\n%s\n\nTrust it and continue?", conn.Name, conn.Host, fingerprint)
 	if conn.TrustedHostKeyFingerprint != "" {
@@ -384,18 +410,18 @@ func (c *commander) showHostKeyTrustPrompt(conn *connections.Connection, secret,
 		conn.TrustedHostKeyFingerprint = fingerprint
 		c.connectionConfig.Upsert(*conn)
 		c.saveConnections()
-		c.finishSFTPConnect(conn, secret, target, onConnected)
+		c.finishSFTPConnect(conn, secret, target, onConnected, onFailed)
 	}, c.win))
 }
 
 // finishSFTPConnect does the real (authenticated) connect in the background
 // and, on success, opens a new tab in target rooted at conn.RemotePath.
-func (c *commander) finishSFTPConnect(conn *connections.Connection, secret string, target *pane, onConnected func()) {
+func (c *commander) finishSFTPConnect(conn *connections.Connection, secret string, target *pane, onConnected func(), onFailed func(error)) {
 	go func() {
 		fs, err := sftpfs.Connect(conn, secret)
 		fyne.Do(func() {
 			if err != nil {
-				dialog.ShowError(fmt.Errorf("connect to %s: %w", conn.Host, err), c.win)
+				onFailed(fmt.Errorf("connect to %s: %w", conn.Host, err))
 				return
 			}
 			state := panelstate.New(fs.Presented(conn.RemotePath))
@@ -413,12 +439,12 @@ func (c *commander) finishSFTPConnect(conn *connections.Connection, secret strin
 // (see smbfs.Connect/StartPath — conn.RemotePath's first component names
 // the share itself, so there's no separate presented-path assembly step
 // the way connectSFTP/finishSFTPConnect have).
-func (c *commander) connectSMB(conn *connections.Connection, secret string, target *pane, onConnected func()) {
+func (c *commander) connectSMB(conn *connections.Connection, secret string, target *pane, onConnected func(), onFailed func(error)) {
 	go func() {
 		fs, err := smbfs.Connect(conn, secret)
 		fyne.Do(func() {
 			if err != nil {
-				dialog.ShowError(fmt.Errorf("connect to %s: %w", conn.Host, err), c.win)
+				onFailed(fmt.Errorf("connect to %s: %w", conn.Host, err))
 				return
 			}
 			state := panelstate.New(fs.StartPath())
@@ -436,12 +462,12 @@ func (c *commander) connectSMB(conn *connections.Connection, secret string, targ
 // Unlike SFTP, there's no separate probe/trust step: the TLS certificate
 // pin is expected to already be known (copied from wherever the listener
 // printed it on startup) and is checked directly inside fileagentfs.Connect.
-func (c *commander) connectFileAgent(conn *connections.Connection, secret string, target *pane, onConnected func()) {
+func (c *commander) connectFileAgent(conn *connections.Connection, secret string, target *pane, onConnected func(), onFailed func(error)) {
 	go func() {
 		fs, err := fileagentfs.Connect(conn, secret)
 		fyne.Do(func() {
 			if err != nil {
-				dialog.ShowError(fmt.Errorf("connect to %s: %w", conn.Host, err), c.win)
+				onFailed(fmt.Errorf("connect to %s: %w", conn.Host, err))
 				return
 			}
 			state := panelstate.New(fs.Presented(conn.RemotePath))

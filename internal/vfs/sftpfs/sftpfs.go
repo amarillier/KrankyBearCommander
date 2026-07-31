@@ -44,7 +44,17 @@ type FS struct {
 	sshConn  *ssh.Client
 	sftpConn *sftp.Client
 	prefix   string // "sftp://user@host:port" — no trailing slash, see the package doc
+	// connectionID is the saved connections.Connection.ID this FS was opened
+	// from (see Connect) — read back via ConnectionID() by the Connections
+	// manager UI (Add to Favorites) to know which saved connection to
+	// reconnect through later, without any presented-path prefix-matching
+	// guesswork.
+	connectionID string
 }
+
+// ConnectionID returns the saved connections.Connection.ID this FS was
+// opened from — see the connectionID field's doc comment.
+func (fs *FS) ConnectionID() string { return fs.connectionID }
 
 // Fingerprint returns key's SHA-256 fingerprint as lowercase hex — the same
 // value ProbeHostKey reports and Connect verifies against.
@@ -190,9 +200,10 @@ func Connect(conn *connections.Connection, secret string) (*FS, error) {
 		return nil, fmt.Errorf("start SFTP session: %w", err)
 	}
 	return &FS{
-		sshConn:  sshConn,
-		sftpConn: sftpConn,
-		prefix:   fmt.Sprintf("sftp://%s@%s", conn.Username, a),
+		sshConn:      sshConn,
+		sftpConn:     sftpConn,
+		prefix:       fmt.Sprintf("sftp://%s@%s", conn.Username, a),
+		connectionID: conn.ID,
 	}, nil
 }
 
@@ -283,6 +294,14 @@ func (fs *FS) Remove(p string) error {
 // os.Rename on some platforms.
 func (fs *FS) Rename(oldPath, newPath string) error {
 	return fs.sftpConn.Rename(fs.internalPath(oldPath), fs.internalPath(newPath))
+}
+
+// Symlink creates a symbolic link at linkPath pointing to target (both
+// presented paths on this connection) — pkg/sftp's Client.Symlink maps
+// directly onto the same op OpenSSH's own sftp/scp clients use, so this is
+// as reliable as local os.Symlink (see contextmenu_ui.go's createSymlink).
+func (fs *FS) Symlink(target, linkPath string) error {
+	return fs.sftpConn.Symlink(fs.internalPath(target), fs.internalPath(linkPath))
 }
 
 // Join concatenates presented paths — deliberately NOT delegated to
