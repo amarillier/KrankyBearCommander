@@ -154,14 +154,18 @@ external editors, see EDITORS below); Duplicate (copies it alongside itself
 as "name copy", "name copy 2", …); Move to Trash; Copy (real files, to the
 OS clipboard — see COPY/PASTE & DRAG-IN below) / Paste (into this
 directory) / Copy Name / Copy Path (as text); Compress (To .zip, always
-available, or To .7z — see COMPRESSING below); Create Symbolic Link…
-(defaults to "link-<name>" alongside the source, name pre-selected);
-Reveal in File Manager (opens Finder/Explorer/your Linux file manager with
-the item selected); Reveal in Opposite Pane / Reveal in Opposite Pane (New
-Tab); and, for directories, Add to Favorites. Compress acts on the whole
-current selection (or just the cursor row); Paste acts on this row's
-directory regardless of which row you right-clicked; everything else here
-acts on whichever row you right-clicked.
+available, or To .7z — see COMPRESSING below); Multi-Rename Tool… (see
+below); Change Attributes… (see below); Create Symbolic Link… (defaults to
+"link-<name>" alongside the source, name pre-selected); Reveal in File
+Manager (opens Finder/Explorer/your Linux file manager with the item
+selected); Properties (Windows) / Get Info (macOS) — opens the OS's own
+native file-properties window; not offered on Linux, which has no
+equivalent universal command; Reveal in Opposite Pane / Reveal in Opposite
+Pane (New Tab); and, for directories, Add to Favorites. Compress/Multi-
+Rename Tool/Change Attributes act on the whole current selection (or just
+the cursor row); Paste acts on this row's directory regardless of which row
+you right-clicked; everything else here acts on whichever row you
+right-clicked.
 Inside an open archive this menu is much shorter — see BROWSING ARCHIVES.
 
 MULTI-RENAME TOOL:
@@ -184,6 +188,31 @@ Reopens with whatever Pattern/Case/Find/Replace/Regex you used last time
 already filled in, rather than resetting to defaults.
 After a successful rename, the selection is cleared (since renamed items no
 longer match it); a rejected batch leaves your selection as-is to retry.
+
+CHANGE ATTRIBUTES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Right-click / File menu / F9 popup → Change Attributes… batch-edits the
+selection (or just the cursor row). What's offered depends on the platform:
+• Windows: Read-only, Hidden, Archive, and System — its own attribute bits.
+• macOS/Linux: full POSIX permissions instead — Owner/Group/Other × Read/
+  Write/Execute, the same model chmod/Finder's own Info panel use — plus
+  Hidden on macOS specifically (Linux has no real "hidden" attribute, only
+  a leading-dot filename convention, so it isn't offered there; System/
+  Archive have no equivalent outside Windows at all).
+Every one of these is Unchanged/Set/Clear rather than a plain on/off, so a
+batch over a mixed selection can leave files that already differ alone
+rather than forcing them all to the same value. The modified date/time is
+also editable (a "Now" button fills in the current date/time; type your
+own otherwise). "Recurse subdirectories" applies the same changes
+throughout a selected folder's tree — except Windows' Read-only
+specifically, which only ever applies to files, never to directories
+themselves (clearing a directory's own write bit on macOS/Linux would block
+adding, removing, or renaming anything inside it, including undoing the
+change again later, a far more disruptive lock than "read-only" means for
+a folder on Windows); the macOS/Linux permission grid has no such
+exemption — reaching for full chmod-style control means you get real
+chmod -R-style behavior, directories included. Local files only — not
+offered against an open archive, a Listbox view, or a connection tab.
 
 COMPRESSING:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -237,6 +266,26 @@ one of any number of external editors you configure (a name plus the
 command to launch — the file path is appended as its last argument).
 Change the default, or add/remove external editors, from F9 → Editors.
 
+APPLICATION LAUNCHER:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File menu / F9 popup → Application Launcher…, or the file-with-a-page
+toolbar button on each pane (next to 🖥 Connections) — a plain alphabetized,
+filterable list of applications you add (a name plus the program to run);
+type in the filter box to narrow it, click an entry to launch it and close
+the list. Launched detached, as its own separate process — it keeps
+running even if you quit Commander, no orphan/zombie child left behind.
+Two ways to add one: drag an application file straight in while the list
+is open (fastest — just Name + Command, Start In defaulted to the app's
+own directory), or the Add… button for the full form, which also offers
+Parameters (arguments, quote a value with spaces — e.g. --title "My App"),
+Start In (the working directory the app launches in), and Environment
+Variables (one KEY=VALUE per line, added on top of the normal environment,
+not replacing it) — ideas borrowed from ../KrankyBearExecutor. Each entry's
+Edit… button opens the same form later, so a quick drag-added entry can
+get these filled in afterward without re-adding it. Deliberately simpler
+than Executor otherwise: no comments/alias field, and no grouping several
+apps to launch together.
+
 PANEL COLORS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 The pane colors (background, normal/selected/cursor-row/directory text)
@@ -251,6 +300,24 @@ HIDDEN FILES:
 Dotfiles are hidden by default. Toggle Show Hidden Files from the View menu
 or F9 popup — the choice applies to both panes and persists across
 launches.
+
+EXPORT/IMPORT SETTINGS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File menu / F9 popup → Export Settings…/Import Settings… bundles
+everything that persists across launches — general preferences (window
+size, panel colors, hidden-files/drive-bar visibility, column widths,
+7-Zip path, Multi-Rename's remembered pattern, ...), Favorites, Editors,
+Connections, the Application Launcher list, and window/tab layout — into
+one zip, so moving settings to another install (a reinstall, or a
+different machine) is a single file instead of hunting through several
+OS-specific locations. Saved connection/launcher passwords, SSH key
+passphrases, and FileAgent pre-shared keys live only in the OS keychain
+and are never included — re-enter those after importing. Application
+Launcher entries and Connections' SSH key paths are also unlikely to carry
+over meaningfully to a different machine or OS (different apps installed,
+different file paths) — edit or remove what doesn't apply after importing.
+Import writes the files immediately but doesn't take effect until you
+restart — it offers to quit right then for you.
 
 FOLDER SIZES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

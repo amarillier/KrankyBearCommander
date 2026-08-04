@@ -38,6 +38,7 @@ type pane struct {
 	onContextMenu        func(p *pane, view *fileListView, name string, pos fyne.Position) // right-click on a row; commander owns the menu (contextmenu_ui.go)
 	onSearch             func()                                                            // Search button clicked; commander owns the search dialog (search_ui.go)
 	onConnections        func()                                                            // Connection button clicked; commander owns the Connections manager (connections_ui.go), opening a new tab in THIS pane
+	onLauncher           func()                                                            // Application Launcher button clicked; commander owns the launcher popup (launcher_ui.go)
 	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)                   // Enter/double-click on a file inside an open archive; commander extracts + opens it (archive_browse_ui.go)
 	onEject              func(root string) error                                           // Eject clicked on a drive button; commander navigates both panes off it first (drivebutton_ui.go)
 	onRefreshAll         func()                                                            // this pane's own ⟳ drive-bar button clicked; commander refreshes both panes (see commander.doRefresh) rather than just this one
@@ -59,8 +60,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func()) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onLauncher func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func()) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onLauncher: onLauncher, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -113,7 +114,18 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	})
 	connectionsBtn.SetToolTip("Connect to a saved remote connection, opening it in a new tab in this pane")
 
-	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn, connectionsBtn)
+	launcherBtn := ttwidget.NewButtonWithIcon("", theme.FileApplicationIcon(), func() {
+		p.onActivated()
+		if p.onLauncher != nil {
+			p.onLauncher()
+		}
+		// No unfocus() here, matching searchBtn above: the launcher popup
+		// focuses its own filter field immediately so typing works without
+		// an extra click.
+	})
+	launcherBtn.SetToolTip("Application Launcher: launch a configured application, or add one")
+
+	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn, connectionsBtn, launcherBtn)
 	p.driveBar = container.NewHScroll(p.buildDriveBarContent())
 
 	p.tabs = container.NewDocTabs()

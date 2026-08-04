@@ -16,7 +16,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "0.9.0" // see FyneApp.toml
+	appVersion = "1.0.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -124,6 +124,7 @@ func quitApp(a fyne.App, win fyne.Window) {
 func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	editorsItem := fyne.NewMenuItem("Manage Editors…", func() { cmdr.showManageEditors() })
 	connectionsItem := fyne.NewMenuItem("Connections…", func() { cmdr.showConnections(cmdr.activePane()) })
+	launcherItem := fyne.NewMenuItem("Application Launcher…", func() { cmdr.showLauncherMenu(cmdr.activePane()) })
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
 		fyne.NewMenuItem("Search… (active pane) (Ctrl+F)", func() { cmdr.showSearch(cmdr.activePane()) }),
@@ -133,7 +134,11 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 		fyne.NewMenuItemSeparator(),
 		editorsItem,
 		connectionsItem,
+		launcherItem,
 		fyne.NewMenuItem("7-Zip Binary Path…", func() { cmdr.showSevenZipSettings() }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Export Settings…", func() { cmdr.showExportSettings() }),
+		fyne.NewMenuItem("Import Settings…", func() { cmdr.showImportSettings() }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", func() { fyne.Do(func() { quitApp(a, win) }) }),
 	)

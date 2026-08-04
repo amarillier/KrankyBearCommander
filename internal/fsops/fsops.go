@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ConflictAction is the caller's decision when a destination path already
@@ -345,6 +346,179 @@ func CompressSevenZip(binary string, sources []string, destArchive string) error
 // lets a user type "new/sub" in one go).
 func Mkdir(path string) error {
 	return os.MkdirAll(path, 0o755)
+}
+
+// AttrChange is one attribute's requested change in a batch Change
+// Attributes operation (see SetAttributes) — a tri-state in place of a
+// plain bool, since a batch over a mixed selection needs a way to say
+// "leave however each file already has this one," not just set/clear.
+type AttrChange int
+
+const (
+	AttrUnchanged AttrChange = iota
+	AttrSet
+	AttrClear
+)
+
+// Attributes is one Change Attributes request. Hidden/Archive/System are
+// only meaningful on platforms with a real matching attribute bit — see
+// setHidden/setArchive/setSystem (attrs_windows.go, attrs_darwin.go,
+// attrs_unix.go), each a real implementation or a harmless no-op depending
+// on the platform, so SetAttributes itself needs no runtime.GOOS branching;
+// the UI layer decides which of these to even offer per platform.
+//
+// The 9 Owner/Group/Other × Read/Write/Execute fields are POSIX's own full
+// permission model — the UI only offers these on macOS/Linux, in place of
+// ReadOnly there (Windows keeps ReadOnly instead, its own closest concept).
+// Unlike ReadOnly, these are NOT exempted from directories during
+// recursion — see setPermissionBits's doc comment for why.
+type Attributes struct {
+	ReadOnly, Hidden, Archive, System   AttrChange
+	OwnerRead, OwnerWrite, OwnerExecute AttrChange
+	GroupRead, GroupWrite, GroupExecute AttrChange
+	OtherRead, OtherWrite, OtherExecute AttrChange
+	SetTime                             bool
+	ModTime                             time.Time
+}
+
+// hasPermissionChange reports whether any of the 9 Owner/Group/Other
+// permission fields request an actual change.
+func (a Attributes) hasPermissionChange() bool {
+	return a.OwnerRead != AttrUnchanged || a.OwnerWrite != AttrUnchanged || a.OwnerExecute != AttrUnchanged ||
+		a.GroupRead != AttrUnchanged || a.GroupWrite != AttrUnchanged || a.GroupExecute != AttrUnchanged ||
+		a.OtherRead != AttrUnchanged || a.OtherWrite != AttrUnchanged || a.OtherExecute != AttrUnchanged
+}
+
+// SetAttributes applies attrs to each of paths, recursing into
+// subdirectories first if recurse is true — same one-flat-loop-over-sources
+// shape Delete uses, with filepath.WalkDir doing the recursion when asked
+// for, the same pattern totalSize/addDirToZip already use elsewhere in this
+// file.
+func SetAttributes(paths []string, recurse bool, attrs Attributes) error {
+	// ReadOnly only ever applies to regular files, never directories: on
+	// POSIX, clearing a directory's own write bit blocks adding, removing,
+	// or renaming ANYTHING inside it — including undoing the change again
+	// later — a far more disruptive lock than "read-only" means for a
+	// folder on Windows, where the bit is largely cosmetic there. Hidden/
+	// Archive/System/timestamp have no such asymmetry and apply to
+	// directories too.
+	apply := func(path string, isDir bool) error {
+		if attrs.ReadOnly != AttrUnchanged && !isDir {
+			if err := setReadOnly(path, attrs.ReadOnly == AttrSet); err != nil {
+				return err
+			}
+		}
+		if attrs.Hidden != AttrUnchanged {
+			if err := setHidden(path, attrs.Hidden == AttrSet); err != nil {
+				return err
+			}
+		}
+		if attrs.Archive != AttrUnchanged {
+			if err := setArchive(path, attrs.Archive == AttrSet); err != nil {
+				return err
+			}
+		}
+		if attrs.System != AttrUnchanged {
+			if err := setSystem(path, attrs.System == AttrSet); err != nil {
+				return err
+			}
+		}
+		if attrs.hasPermissionChange() {
+			if err := setPermissionBits(path, attrs); err != nil {
+				return err
+			}
+		}
+		if attrs.SetTime {
+			if err := os.Chtimes(path, attrs.ModTime, attrs.ModTime); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for _, p := range paths {
+		if !recurse {
+			info, err := os.Lstat(p)
+			if err != nil {
+				return err
+			}
+			if err := apply(p, info.IsDir()); err != nil {
+				return err
+			}
+			continue
+		}
+		err := filepath.WalkDir(p, func(walked string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			return apply(walked, d.IsDir())
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setReadOnly toggles the owner-write bit — the same bit localfs's
+// entryFromInfo already reads back as vfs.Entry.ReadOnly, so this is
+// symmetric with how the app already reports read-only elsewhere. On
+// Windows, Go's os.Chmod maps the presence/absence of this one bit
+// directly onto FILE_ATTRIBUTE_READONLY.
+func setReadOnly(path string, on bool) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode().Perm()
+	if on {
+		mode &^= 0o200
+	} else {
+		mode |= 0o200
+	}
+	return os.Chmod(path, mode)
+}
+
+// applyBit returns mode with bit set, cleared, or left alone per change.
+func applyBit(mode fs.FileMode, bit fs.FileMode, change AttrChange) fs.FileMode {
+	switch change {
+	case AttrSet:
+		return mode | bit
+	case AttrClear:
+		return mode &^ bit
+	default:
+		return mode
+	}
+}
+
+// setPermissionBits applies attrs' 9 Owner/Group/Other × Read/Write/Execute
+// fields to path's real POSIX permission bits — the full chmod model,
+// unlike ReadOnly's single simplified bit. Deliberately NOT exempted from
+// directories the way ReadOnly is: someone reaching for the full
+// permission grid has already opted into standard chmod-style control (the
+// same UI a user would recognize from Finder's own Info panel or a
+// terminal's chmod), and should get standard `chmod -R`-style behavior,
+// directories included — unlike a simplified "read-only" toggle, this
+// isn't a surprising side effect of something else.
+func setPermissionBits(path string, attrs Attributes) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode().Perm()
+	mode = applyBit(mode, 0o400, attrs.OwnerRead)
+	mode = applyBit(mode, 0o200, attrs.OwnerWrite)
+	mode = applyBit(mode, 0o100, attrs.OwnerExecute)
+	mode = applyBit(mode, 0o040, attrs.GroupRead)
+	mode = applyBit(mode, 0o020, attrs.GroupWrite)
+	mode = applyBit(mode, 0o010, attrs.GroupExecute)
+	mode = applyBit(mode, 0o004, attrs.OtherRead)
+	mode = applyBit(mode, 0o002, attrs.OtherWrite)
+	mode = applyBit(mode, 0o001, attrs.OtherExecute)
+	if mode == info.Mode().Perm() {
+		return nil
+	}
+	return os.Chmod(path, mode)
 }
 
 // DirSize returns the total size of every file under path, walked

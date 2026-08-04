@@ -37,14 +37,22 @@ fixing and performance work.
 - **Right-click context menu**: Open, Open With (your configured external
   editors), Duplicate, Move to Trash, Copy/Paste (real files, to/from the OS
   clipboard) or Copy Name/Path (as text), Compress (to .zip, or .7z if a
-  7z-capable binary is available), Multi-Rename Tool…, Create Symbolic
-  Link…, Reveal in File Manager, Reveal in Opposite Pane, and Add to
-  Favorites for directories.
+  7z-capable binary is available), Multi-Rename Tool…, Change Attributes…,
+  Create Symbolic Link…, Reveal in File Manager, Properties (Windows) /
+  Get Info (macOS), Reveal in Opposite Pane, and Add to Favorites for
+  directories.
 - **Multi-Rename Tool** (Ctrl+M) — TotalCmd-style batch rename with pattern
   placeholders (`[N]` name, `[N1-3]` name characters, `[E]` extension,
   `[C]` counter with start/step/zero-padding), whole-name case conversion,
   and find/replace (plain text or regex), with a live old→new preview
   before anything changes on disk.
+- **Change Attributes** — batch-edit the current selection, with an
+  optional recursive mode. Windows: Read-only, Hidden, Archive, System (its
+  own attribute bits). macOS/Linux: full POSIX permissions instead —
+  Owner/Group/Other × Read/Write/Execute, the same model chmod/Finder's
+  Info panel use — plus Hidden on macOS. Also edits the modified date/time.
+  Each is Unchanged/Set/Clear rather than a plain toggle, so a mixed
+  selection can leave files that already differ alone.
 - **Native OS clipboard and drag-in**: Ctrl/Cmd+C copies the selection as
   real files — Paste into Finder/Explorer/Nautilus copies them there for
   real; Ctrl/Cmd+V does the reverse. Implemented as native platform code
@@ -94,6 +102,15 @@ fixing and performance work.
   files, and a simple text editor with Save/Save As. F4 can also launch any
   number of **external editors** you configure (name + command); pick the
   default from the popup menu, per-file overrides included.
+- **Application Launcher** (File menu / F9 popup, or the toolbar button next
+  to 🖥 Connections) — a plain, filterable, alphabetized list of
+  applications you add; click one to launch it detached — it keeps running
+  even after Commander quits, no orphan/zombie child left behind. Drag an
+  application in for a quick Name+Command add, or use Add… for the full
+  form: Parameters, Start In, and Environment Variables too (ideas borrowed
+  from `../KrankyBearExecutor`, minus its comments/alias field and
+  multi-app groups). Deliberately simple otherwise: a text list, no icons,
+  no toolbar-style grouping.
 - **Favorites** — a shared bookmark list (with your filesystem's volumes
   listed alongside it) available from either pane; right-click any directory
   to bookmark it, or use "Add Current Directory…". Seeded on first run with
@@ -118,6 +135,12 @@ fixing and performance work.
   scheme (navy background, cyan/yellow/red text for normal/selected/cursor
   rows), fully customizable via a color picker; independent of the
   Light/Dark/System app theme.
+- **Export/Import Settings** (File menu / F9 popup) — bundles everything
+  that persists across launches (general preferences, Favorites, Editors,
+  Connections, Application Launcher, window/tab layout) into one zip, for
+  backing up or moving to another install. Keychain-stored secrets aren't
+  included (re-enter those after importing); import writes the files
+  immediately and offers to restart so the changes actually take effect.
 - Double-click/Enter opens directories, launches other executables directly
   (detached — they keep running after you quit, and won't get wrapped in a
   Terminal window on macOS), and opens everything else with your OS's

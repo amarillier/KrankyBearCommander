@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -25,6 +26,20 @@ import (
 	"commander/internal/vfs/listboxfs"
 	"commander/internal/vfs/zipfs"
 )
+
+// propertiesMenuLabel returns the platform-appropriate label for the
+// Properties/Get Info menu item, and whether to offer it at all — there's
+// no equivalent universal command on Linux (see launch.ShowProperties).
+func propertiesMenuLabel() (string, bool) {
+	switch runtime.GOOS {
+	case "windows":
+		return "Properties", true
+	case "darwin":
+		return "Get Info", true
+	default:
+		return "", false
+	}
+}
 
 // showRowContextMenu builds and shows the popup for name (already resolved
 // to a real row — offerContextMenu excludes "" and "..").
@@ -65,6 +80,7 @@ func (c *commander) showRowContextMenu(p *pane, view *fileListView, name string,
 	items = append(items,
 		compressItem,
 		fyne.NewMenuItem("Multi-Rename Tool…", func() { c.showMultiRenameToolFor(view) }),
+		fyne.NewMenuItem("Change Attributes…", func() { c.showChangeAttributesFor(view) }),
 		fyne.NewMenuItem("Create Symbolic Link…", func() { c.createSymlink(view, fullPath, c.inactivePaneOf(p)) }),
 		fyne.NewMenuItem("Reveal in File Manager", func() {
 			if err := launch.RevealInFileManager(fullPath, entry.IsDir); err != nil {
@@ -72,6 +88,17 @@ func (c *commander) showRowContextMenu(p *pane, view *fileListView, name string,
 			}
 		}),
 	)
+
+	// Properties (Windows) / Get Info (macOS) — omitted entirely on Linux,
+	// same "only show when actually usable" precedent as "To .7z" only
+	// appearing when a 7z binary is actually found (see compressMenuItems).
+	if label, ok := propertiesMenuLabel(); ok {
+		items = append(items, fyne.NewMenuItem(label, func() {
+			if err := launch.ShowProperties(fullPath); err != nil {
+				dialog.ShowError(err, c.win)
+			}
+		}))
+	}
 
 	targetDir := fullPath
 	if !entry.IsDir {

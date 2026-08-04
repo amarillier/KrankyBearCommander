@@ -14,6 +14,7 @@ import (
 	"commander/internal/connections"
 	"commander/internal/editors"
 	"commander/internal/favorites"
+	"commander/internal/launchers"
 	"commander/internal/layout"
 	"commander/internal/vfs"
 	"commander/internal/vfs/localfs"
@@ -37,10 +38,16 @@ type commander struct {
 	favorites        favorites.List     // shared across both panes — see favorites_ui.go
 	editorConfig     editors.Config     // F4 preference — see editors_ui.go
 	connectionConfig connections.Config // saved remote connections — see connections_ui.go
-	showHiddenFiles  bool               // dotfile visibility, shared across both panes — see toggleHiddenFiles
-	showDriveBar     bool               // volume/drive toolbar visibility, shared across both panes — see toggleDriveBar
-	briefColumns     int                // Brief view column count, shared across both panes (0 = Auto) — see setBriefColumns
-	sevenZipPath     string             // optional 7z/7za/7zz binary override — see archive_ui.go
+	launcherConfig   launchers.Config   // Application Launcher's saved apps — see launcher_ui.go
+	// launcherPopupAdd is non-nil only while the launcher popup is showing
+	// (set/cleared by showLauncherMenu) — lets dragdrop_ui.go's
+	// handleDropped add a dropped file as a launcher instead of copying it
+	// into a pane, without either file needing to know the other's details.
+	launcherPopupAdd func(name, command string)
+	showHiddenFiles  bool   // dotfile visibility, shared across both panes — see toggleHiddenFiles
+	showDriveBar     bool   // volume/drive toolbar visibility, shared across both panes — see toggleDriveBar
+	briefColumns     int    // Brief view column count, shared across both panes (0 = Auto) — see setBriefColumns
+	sevenZipPath     string // optional 7z/7za/7zz binary override — see archive_ui.go
 
 	left  *pane
 	right *pane
@@ -62,10 +69,11 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.loadFavorites()
 	c.loadEditors()
 	c.loadConnections()
+	c.loadLaunchers()
 	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh)
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5

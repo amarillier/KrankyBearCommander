@@ -3,9 +3,12 @@ package fsops
 import (
 	"archive/zip"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func mustWriteFile(t *testing.T, path, content string) {
@@ -235,6 +238,213 @@ func TestMkdirNested(t *testing.T) {
 	st, err := os.Stat(target)
 	if err != nil || !st.IsDir() {
 		t.Fatalf("expected nested dir to exist: %v %+v", err, st)
+	}
+}
+
+// TestSetAttributesReadOnly covers the one attribute with a real,
+// cross-platform-testable effect (os.Chmod's owner-write bit) — Hidden/
+// Archive/System are Windows/macOS-syscall-only (see attrs_windows.go/
+// attrs_darwin.go) and can't be meaningfully asserted on whatever platform
+// `go test` happens to run on; those are manually verified only.
+func TestSetAttributesReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	mustWriteFile(t, path, "content")
+
+	if err := SetAttributes([]string{path}, false, Attributes{ReadOnly: AttrSet}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o200 != 0 {
+		t.Fatalf("expected owner-write bit cleared after AttrSet, mode = %v", info.Mode())
+	}
+
+	if err := SetAttributes([]string{path}, false, Attributes{ReadOnly: AttrClear}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o200 == 0 {
+		t.Fatalf("expected owner-write bit restored after AttrClear, mode = %v", info.Mode())
+	}
+}
+
+func TestSetAttributesUnchangedLeavesReadOnlyAlone(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	mustWriteFile(t, path, "content")
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetAttributes([]string{path}, false, Attributes{}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Mode() != after.Mode() {
+		t.Fatalf("AttrUnchanged (zero value) should leave the mode alone: before %v, after %v", before.Mode(), after.Mode())
+	}
+}
+
+func TestSetAttributesTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	mustWriteFile(t, path, "content")
+
+	want := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := SetAttributes([]string{path}, false, Attributes{SetTime: true, ModTime: want}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(want) {
+		t.Fatalf("ModTime = %v, want %v", info.ModTime(), want)
+	}
+}
+
+func TestSetAttributesRecursesIntoSubdirectories(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(dir, "sub", "a.txt")
+	mustWriteFile(t, nested, "content")
+
+	if err := SetAttributes([]string{dir}, true, Attributes{ReadOnly: AttrSet}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o200 != 0 {
+		t.Fatalf("expected the nested file's owner-write bit cleared too, mode = %v", info.Mode())
+	}
+}
+
+// TestSetAttributesReadOnlySkipsDirectories is a regression test: clearing
+// a directory's own write bit on POSIX blocks adding/removing/renaming
+// anything inside it (including undoing the change again later) — a far
+// more disruptive lock than "read-only" means for a folder on Windows.
+// SetAttributes must never do this, even when recursing.
+func TestSetAttributesReadOnlySkipsDirectories(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(sub, "a.txt"), "content")
+
+	if err := SetAttributes([]string{dir}, true, Attributes{ReadOnly: AttrSet}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o200 == 0 {
+		t.Fatalf("directory should keep its write bit, mode = %v", info.Mode())
+	}
+	// Confirm the tree is still fully usable afterward (this would fail if
+	// sub had lost its own write bit).
+	if err := os.Remove(filepath.Join(sub, "a.txt")); err != nil {
+		t.Fatalf("nested file should still be removable: %v", err)
+	}
+}
+
+// TestSetAttributesPermissionBits covers the full POSIX owner/group/other
+// grid — Set/Clear/Unchanged per bit, independent of ReadOnly's own
+// simplified single-bit concept. Windows' os.Chmod only ever respects the
+// owner-write bit, so this is skipped there — it's meaningfully tested on
+// macOS/Linux only, matching the UI, which only offers this grid there too.
+func TestSetAttributesPermissionBits(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits aren't meaningful on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	mustWriteFile(t, path, "content")
+	if err := os.Chmod(path, 0o644); err != nil { // rw-r--r--
+		t.Fatal(err)
+	}
+
+	if err := SetAttributes([]string{path}, false, Attributes{
+		OwnerExecute: AttrSet,   // add owner execute
+		GroupWrite:   AttrSet,   // add group write
+		OtherRead:    AttrClear, // drop other read
+	}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Want: rwxrw----  (0o760): owner rwx (r,w unchanged, x added), group
+	// rw- (r unchanged, w added, x still unchanged/clear), other --- (r
+	// cleared, w/x unchanged/clear).
+	if got, want := info.Mode().Perm(), fs.FileMode(0o760); got != want {
+		t.Fatalf("mode = %v, want %v", got, want)
+	}
+}
+
+func TestSetAttributesPermissionBitsUnchangedLeavesModeAlone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits aren't meaningful on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	mustWriteFile(t, path, "content")
+	if err := os.Chmod(path, 0o741); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetAttributes([]string{path}, false, Attributes{SetTime: true, ModTime: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info.Mode().Perm(), fs.FileMode(0o741); got != want {
+		t.Fatalf("mode = %v, want unchanged %v", got, want)
+	}
+}
+
+// TestSetAttributesPermissionBitsAppliesToDirectoriesToo is the deliberate
+// contrast with TestSetAttributesReadOnlySkipsDirectories: someone reaching
+// for the full permission grid has already opted into standard chmod-style
+// control and should get chmod -R-style behavior, directories included.
+func TestSetAttributesPermissionBitsAppliesToDirectoriesToo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits aren't meaningful on Windows")
+	}
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(sub, "a.txt"), "content")
+
+	if err := SetAttributes([]string{dir}, true, Attributes{OtherWrite: AttrSet}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o002 == 0 {
+		t.Fatalf("expected the directory itself to also get other-write set, mode = %v", info.Mode())
 	}
 }
 

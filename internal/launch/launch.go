@@ -13,6 +13,8 @@
 package launch
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +89,96 @@ func RevealInFileManager(path string, isDir bool) error {
 		}
 		return exec.Command("xdg-open", target).Start()
 	}
+}
+
+// ShowProperties opens the OS's native file-properties dialog for path —
+// Windows Explorer's Properties, macOS Finder's Get Info. There's no
+// equivalent universal command on Linux, so callers should simply not
+// offer this there (see contextmenu_ui.go, which only adds the menu item
+// on darwin/windows, mirroring how "To .7z" only appears when a 7z binary
+// is actually available).
+func ShowProperties(path string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		script := fmt.Sprintf(`tell application "Finder" to open information window of (POSIX file %q as alias)`, path)
+		return exec.Command("osascript", "-e", script).Start()
+	case "windows":
+		return showPropertiesWindows(path)
+	default:
+		return errors.New("viewing file properties isn't supported on this platform")
+	}
+}
+
+// RunOptions configures Run — all fields optional/zero-value-safe.
+type RunOptions struct {
+	// Args are passed as-is (already split — see SplitArgs for turning a
+	// user-typed "Parameters" string into this).
+	Args []string
+	// WorkingDir is the directory the process starts in ("Start In") — the
+	// launched process's own cwd if left empty, i.e. Commander's.
+	WorkingDir string
+	// Env is "KEY=VALUE" pairs APPENDED to the inherited environment
+	// (augmenting it, not replacing it) — a later duplicate key wins, per
+	// os/exec's own documented behavior for a repeated Env entry.
+	Env []string
+}
+
+// Run launches command directly, detached the same way Open/OpenWith are —
+// the Application Launcher's own "click to launch" action. Unlike
+// OpenWith, no file-path argument is appended: a launcher entry has
+// nothing to open, only whatever opts.Args says to pass.
+func Run(command string, opts RunOptions) error {
+	cmd := exec.Command(command, opts.Args...)
+	cmd.SysProcAttr = detachAttr()
+	if opts.WorkingDir != "" {
+		cmd.Dir = opts.WorkingDir
+	}
+	if len(opts.Env) > 0 {
+		cmd.Env = append(os.Environ(), opts.Env...)
+	}
+	return cmd.Start()
+}
+
+// SplitArgs splits a user-typed "Parameters" string into individual
+// arguments, whitespace-separated but respecting "double" and 'single'
+// quoted segments so e.g. `--title "My App"` stays one argument rather than
+// splitting on the space inside it. A minimal shell-word-splitter, not a
+// full shell parser (no variable expansion, escaping is limited to closing
+// a quote) — enough for the common case without a new dependency.
+func SplitArgs(s string) []string {
+	var args []string
+	var cur strings.Builder
+	var quote rune
+	inArg := false
+
+	flush := func() {
+		if inArg {
+			args = append(args, cur.String())
+			cur.Reset()
+			inArg = false
+		}
+	}
+
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '"' || r == '\'':
+			quote = r
+			inArg = true
+		case r == ' ' || r == '\t' || r == '\n':
+			flush()
+		default:
+			inArg = true
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	return args
 }
 
 func openWithDefaultApp(path string) error {

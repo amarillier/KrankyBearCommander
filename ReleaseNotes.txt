@@ -1,6 +1,65 @@
 Later phase someday maybe if practical - low priority now
-- TotalCmd launch apps toolbar - drag apps onto a config, launch them from Commander; used something like this a lot years ago, then found a free Windows Executor tool, hotkey-activated. Still like the idea, but since ../KrankyBearExecutor already covers hotkey-based launches, this would only be a nice-to-have convenience, not a real need - maybe, maybe never, and far lower value than Connections manager
-- drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-kused of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+- drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+
+Version 1.0.0 - August 04, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Change Attributes… (right-click / File menu / F9 popup) batch-edits
+   the current selection (or just the cursor row) and the modified date/
+   time (a "Now" button, or type your own). What's offered depends on the
+   platform: Windows gets Read-only/Hidden/Archive/System, its own
+   attribute bits; macOS/Linux get full POSIX permissions instead — Owner/
+   Group/Other × Read/Write/Execute, the same model chmod/Finder's own
+   Info panel use — plus Hidden on macOS specifically (Linux has no real
+   "hidden" attribute, only a leading-dot filename convention, so it isn't
+   offered there; Archive/System have no equivalent outside Windows at
+   all). Every one of these is Unchanged/Set/Clear rather than a plain
+   toggle, so a mixed selection can leave files that already differ alone
+   instead of forcing them all to one value. "Recurse subdirectories"
+   applies throughout a folder's tree — except Windows' Read-only
+   specifically, which only ever applies to files, never directories
+   themselves (clearing a directory's own write bit on macOS/Linux would
+   block adding, removing, or renaming anything inside it, including
+   undoing the change again later, a far more disruptive lock than
+   "read-only" means for a folder on Windows); the macOS/Linux permission
+   grid has no such exemption — reaching for full chmod-style control
+   means real chmod -R-style behavior, directories included. Local files
+   only, same as Multi-Rename Tool — not offered against an archive,
+   Listbox view, or connection tab.
+✨ NEW Properties (Windows) / Get Info (macOS) on the right-click menu —
+   opens the OS's own native file-properties window, the same one
+   Explorer's/Finder's own right-click menu opens. Not offered on Linux,
+   which has no equivalent universal command across desktop environments.
+✨ NEW Application Launcher (File menu / F9 popup, or the toolbar button
+   next to 🖥 Connections) — a plain, alphabetized, filterable list of
+   applications you add; click one to launch it detached (it keeps
+   running even after Commander quits — no orphan/zombie child left
+   behind). Drag an application file in for a quick Name+Command add
+   (Start In defaulted to its own directory), or use the Add… button for
+   the full form: Parameters, Start In, and Environment Variables too
+   (ideas borrowed from ../KrankyBearExecutor, minus its comments/alias
+   field and multi-app groups — not wanted here) — each entry's Edit…
+   button opens the same form later, so a quick drag-added entry can get
+   these filled in afterward. Deliberately simpler than TotalCmd's icon
+   toolbars otherwise (floated as a "someday" idea earlier, now built this
+   way instead): a plain text list, no icons, no drag-positioned toolbar
+   buttons, no secondary grouped bars.
+✨ NEW Export Settings… / Import Settings… (File menu / F9 popup) bundles
+   everything that persists across launches — general preferences (window
+   size, panel colors, hidden-files/drive-bar visibility, column widths,
+   7-Zip path, Multi-Rename's remembered pattern, ...), Favorites, Editors,
+   Connections, the Application Launcher list, and window/tab layout —
+   into one zip, so moving settings to another install is a single file
+   instead of hunting through several OS-specific locations. The update-
+   checker's own cache is deliberately excluded — it's cached state, not a
+   real setting. Keychain-stored secrets (connection passwords, SSH key
+   passphrases, FileAgent pre-shared keys) are never included — re-enter
+   those after importing, and expect Application Launcher entries/SSH key
+   paths not to carry over meaningfully to a different machine or OS.
+   Import writes the files immediately but doesn't take effect live —
+   Fyne keeps its own preferences in memory for the app's whole lifetime
+   and rewrites them from that on every quit, which would otherwise
+   silently undo an import — so it offers to quit right then instead;
+   reopen Commander afterward to see the imported settings.
 
 Version 0.9.0 - July 31, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

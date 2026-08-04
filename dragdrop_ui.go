@@ -14,7 +14,10 @@ import (
 
 // handleDropped is Window.SetOnDropped's callback: copies the dropped
 // files into whichever pane the drop landed in, at that pane's active
-// tab's current directory.
+// tab's current directory — unless the Application Launcher popup is
+// currently open, in which case a drop anywhere adds those files as
+// launchers instead (see launcher_ui.go's showLauncherMenu, which sets
+// launcherPopupAdd while showing).
 func (c *commander) handleDropped(pos fyne.Position, uris []fyne.URI) {
 	if len(uris) == 0 {
 		return
@@ -27,6 +30,13 @@ func (c *commander) handleDropped(pos fyne.Position, uris []fyne.URI) {
 		paths = append(paths, u.Path())
 	}
 	if len(paths) == 0 {
+		return
+	}
+
+	if c.launcherPopupAdd != nil {
+		for _, path := range paths {
+			c.launcherPopupAdd(launcherNameFromPath(path), path)
+		}
 		return
 	}
 
