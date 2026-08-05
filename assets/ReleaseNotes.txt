@@ -1,5 +1,39 @@
+Future ideas:
+
 Later phase someday maybe if practical - low priority now
+- possibly allow dragging tabs within a pane to reorder - this adds complexity with a complete pane handling rewrtite, defer
+- maybe right click tab to duplicate, rename, duplicate or move to other pane - this adds complexity with a complete pane handling rewrtite, defer
 - drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+
+Version 1.1.0 - August 05, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Command Line (View menu / F9 popup → Show Command Line, on by
+   default; Ctrl+L to jump to it) — a bar above the function-key row that
+   tracks the active pane's active tab's directory. Type "cd ..", "cd \" /
+   "cd /", "cd somefolder", or a full path to navigate that tab directly
+   (a locked tab still refuses the same way double-clicking would);
+   anything else runs as a real shell command in that directory. Typing a
+   shell's own name (cmd, powershell, bash, ...) opens a real terminal
+   window instead of capturing output, since an interactive shell needs
+   one to be usable at all. A command that prints something shows it in a
+   pane above the bar, with 📋/✕ buttons to copy it to the clipboard or
+   close it (Escape works too, but only while the entry itself has focus);
+   one that prints nothing (e.g. a redirect to a file) just completes
+   quietly and refreshes the tab. Shell commands need a local tab — a
+   connection tab (SFTP/SMB/FileAgent) still accepts "cd", but refuses to
+   run anything else there. Known limitation: clicking a tab that's
+   already selected doesn't reactivate its pane (a Fyne DocTabs
+   limitation), so if the bar seems to be acting on the wrong pane, click
+   a row in the file list you want active first.
+✨ NEW Windows: automatic Mesa3D software-OpenGL fallback. Some VMs and
+   locked-down hosts have no usable hardware OpenGL, which otherwise
+   crashes or hangs the app with no useful explanation. On launch,
+   Commander now quietly probes real OpenGL first (unnoticeable, and
+   real hardware GL is always preferred — it's faster); only if that
+   fails does it switch to a bundled Mesa3D software renderer and
+   relaunch itself once, completely automatically. Off by default in the
+   sense that it never does anything unless the probe actually fails —
+   nothing changes for a normal machine with a working GPU.
 
 Version 1.0.0 - August 04, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

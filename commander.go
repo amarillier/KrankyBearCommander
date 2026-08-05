@@ -46,15 +46,21 @@ type commander struct {
 	launcherPopupAdd func(name, command string)
 	showHiddenFiles  bool   // dotfile visibility, shared across both panes — see toggleHiddenFiles
 	showDriveBar     bool   // volume/drive toolbar visibility, shared across both panes — see toggleDriveBar
+	showCmdLine      bool   // command-line bar visibility — see toggleShowCmdLine (cmdline_ui.go)
 	briefColumns     int    // Brief view column count, shared across both panes (0 = Auto) — see setBriefColumns
 	sevenZipPath     string // optional 7z/7za/7zz binary override — see archive_ui.go
 
 	left  *pane
 	right *pane
 
-	split     *container.Split
-	statusBar *widget.Label
-	root      fyne.CanvasObject
+	split           *container.Split
+	statusBar       *widget.Label
+	cwdLabel        *widget.Label // command bar's cwd display — see cmdline_ui.go
+	cmdEntry        *cmdEntry     // command bar's text field — see cmdline_ui.go
+	cmdOutputLabel  *widget.Label // command bar's output pane — see cmdline_ui.go
+	cmdOutputScroll *container.Scroll
+	cmdLineRow      fyne.CanvasObject // whole command-bar row, shown/hidden by toggleShowCmdLine
+	root            fyne.CanvasObject
 }
 
 func newCommander(a fyne.App, win fyne.Window) *commander {
@@ -62,6 +68,7 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.colorScheme = loadColorScheme(a)
 	c.showHiddenFiles = a.Preferences().Bool(prefShowHiddenFiles)
 	c.showDriveBar = a.Preferences().BoolWithFallback(prefShowDriveBar, true)
+	c.showCmdLine = a.Preferences().BoolWithFallback(prefShowCmdLine, true)
 	c.briefColumns = a.Preferences().IntWithFallback(prefBriefColumns, 0)
 	loadColumnWidths(a) // before any pane/view is built, so their initial SetColumnWidth calls already reflect this
 	c.statusBar = widget.NewLabel("")
@@ -72,20 +79,22 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.loadLaunchers()
 	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh)
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5
 
+	cmdLine := c.buildCmdLineBar()
 	keyBar := c.buildFunctionKeyBar()
-	bottom := container.NewVBox(c.statusBar, keyBar)
+	bottom := container.NewVBox(c.statusBar, cmdLine, keyBar)
 	c.root = container.NewBorder(nil, bottom, nil, nil, c.split)
 
 	c.registerShortcuts()
 	c.loadLayout()
 	c.left.ensureAtLeastOneTab()
 	c.right.ensureAtLeastOneTab()
+	c.refreshCmdLineCwd()
 	return c
 }
 
@@ -121,6 +130,7 @@ func (c *commander) setActivePane(idx int) {
 	if v := c.right.activeView(); v != nil {
 		v.Refresh()
 	}
+	c.refreshCmdLineCwd()
 }
 
 // toggleActivePane is Ctrl+Tab: switches which pane is active, the same as
@@ -197,6 +207,14 @@ func (c *commander) toggleDriveBar() {
 	c.app.Preferences().SetBool(prefShowDriveBar, c.showDriveBar)
 	c.left.refreshDriveBarVisibility()
 	c.right.refreshDriveBarVisibility()
+}
+
+// toggleShowCmdLine flips the bottom command-line bar's visibility and
+// persists it — same shape as toggleDriveBar, see cmdline_ui.go.
+func (c *commander) toggleShowCmdLine() {
+	c.showCmdLine = !c.showCmdLine
+	c.app.Preferences().SetBool(prefShowCmdLine, c.showCmdLine)
+	c.refreshCmdLineVisibility()
 }
 
 // prefBriefColumns persists Brief view's column count, same pattern as

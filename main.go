@@ -12,11 +12,12 @@ import (
 	fynetooltip "github.com/dweymouth/fyne-tooltip"
 
 	"commander/internal/panelstate"
+	"commander/internal/startup"
 )
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "1.0.0" // see FyneApp.toml
+	appVersion = "1.1.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -35,7 +36,15 @@ func buildCopyrightNotice() string {
 
 func main() {
 	langFlag := flag.String("lang", "", "UI language code (e.g. en, de); overrides the saved preference for this run")
+	mesaFallbackFlag := flag.Bool(startup.MesaFallbackFlagName, false, "internal: relaunch flag for the Mesa3D OpenGL fallback (Windows only)")
 	flag.Parse()
+
+	// Windows only (no-op elsewhere): prefer real hardware OpenGL, falling
+	// back to the bundled Mesa3D software renderer (relaunching once) only
+	// if the hardware probe fails. Must run before app.NewWithID — GLFW
+	// only supports one Init/Terminate cycle per process, shared with
+	// Fyne's own driver (see internal/startup/opengl.go).
+	startup.EnsureWindowsOpenGLReady(*mesaFallbackFlag)
 
 	a := app.NewWithID(appID)
 	a.SetIcon(resourceKrankyBearCommanderPng)
@@ -152,6 +161,11 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 		fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) })
 	})
 	driveBarItem.Checked = cmdr.showDriveBar
+	cmdLineItem := fyne.NewMenuItem("Show Command Line", func() {
+		cmdr.toggleShowCmdLine()
+		fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) })
+	})
+	cmdLineItem.Checked = cmdr.showCmdLine
 	briefColumnsItem := fyne.NewMenuItem("Brief Columns", nil)
 	briefColumnsItem.ChildMenu = cmdr.buildBriefColumnsSubmenu(func() { fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) }) })
 	viewMenu := fyne.NewMenu("View",
@@ -163,6 +177,7 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { cmdr.swapPanes() }),
 		hiddenFilesItem,
 		driveBarItem,
+		cmdLineItem,
 		fyne.NewMenuItem("Panel Colors…", func() { showColorSchemeSettings(a, win, cmdr.applyColorScheme) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Light Theme", func() { setLightTheme(a) }),

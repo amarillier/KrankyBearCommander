@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "KrankyBearCommander"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Allan Marillier, 2025-"
 #define MyAppURL "https://github.com/amarillier/KrankyBearCommander"
 #define MyAppExeName "KrankyBearCommander.exe"
@@ -52,8 +52,19 @@ Name: "startup"; Description: "Automatically start on login (or enable later via
 [Files]
 Source: "..\bin\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\images\KrankyBearCommander.ico"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+; mesa-win is excluded here and staged separately below into {app}\mesa-fallback,
+; not {app}\assets\mesa-win — duplicating the ~76MB Mesa DLLs into both places
+; would be wasteful, and the runtime fallback (internal/startup/
+; mesa_fallback_windows.go) only ever looks in <exe dir>\mesa-fallback.
+Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "mesa-win\*"
 Source: "..\ReleaseNotes.txt"; DestDir: "{app}"; Flags: isreadme
+; Mesa3D software OpenGL fallback — staged in its own subfolder, NOT {app}
+; directly, so normal launches keep using real hardware OpenGL.
+; KrankyBearCommander.exe only moves these into {app} directly if a hardware
+; OpenGL probe fails first; see internal/startup/mesa_fallback_windows.go.
+Source: "..\assets\mesa-win\opengl32.dll"; DestDir: "{app}\mesa-fallback"; Flags: ignoreversion
+Source: "..\assets\mesa-win\libgallium_wgl.dll"; DestDir: "{app}\mesa-fallback"; Flags: ignoreversion
+Source: "..\assets\mesa-win\.force-mesa-fallback.sample"; DestDir: "{app}\mesa-fallback"; Flags: ignoreversion
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\{#MyAppAssocExt}\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppAssocKey}"; ValueData: ""; Flags: uninsdeletevalue
@@ -72,3 +83,17 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C ""taskkill /im {#MyAppExeName} /f /t"
+
+[UninstallDelete]
+; Inno's uninstaller only removes files it tracked from [Files] at install
+; time — it won't wildcard-delete a folder's contents, so anything added
+; there after install (e.g. .force-mesa-fallback.sample renamed to
+; .force-mesa-fallback) is otherwise left behind. Nuke the whole
+; mesa-fallback folder regardless of its current contents.
+Type: filesandordirs; Name: "{app}\mesa-fallback"
+; KrankyBearCommander.exe moves these two out of mesa-fallback into {app}
+; directly at runtime (see internal/startup/mesa_fallback_windows.go) on
+; hosts with no usable hardware OpenGL — not part of the original [Files]
+; manifest, so Inno doesn't know to remove them unless told explicitly here.
+Type: files; Name: "{app}\opengl32.dll"
+Type: files; Name: "{app}\libgallium_wgl.dll"

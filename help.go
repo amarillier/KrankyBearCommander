@@ -381,6 +381,25 @@ click it later, rather than just jumping to a path that isn't there yet —
 if that connection has since been removed, clicking the favorite says so
 clearly instead of failing silently.
 
+COMMAND LINE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The bar above the function-key row (View menu / F9 popup → Show Command
+Line, or Ctrl+L to jump to it) tracks the active pane's active tab's
+directory. Type "cd ..", "cd \" / "cd /", "cd somefolder", or a full path to
+navigate that tab directly — a locked tab still refuses navigation the same
+way double-clicking would. Anything else runs as a real shell command in
+that directory; typing a shell's own name (cmd, powershell, bash, ...)
+opens a real terminal window instead of capturing output, since an
+interactive shell needs one to be usable at all. A command that prints
+something shows it in a pane above the bar until dismissed — the 📋/✕
+buttons next to the entry copy that output to the clipboard or close it
+(Escape works too, but only while the entry itself has focus; the buttons
+work even after clicking into the output to select text). One that prints
+nothing (e.g. a redirect to a file) just completes quietly. Shell commands
+need a local tab — a
+connection tab (SFTP/SMB/FileAgent) still accepts "cd", but refuses to run
+anything else there.
+
 SMART FEATURES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✨ Tab/pane/window layout, panel colors, favorites, editor choice, hidden-
@@ -403,6 +422,8 @@ KEYBOARD SHORTCUTS:
 • Ctrl+R - Refresh Both Panes, same as F2 or either pane's own ⟳ button —
   all three always refresh both panes and drive bars, not just one.
 • Ctrl+F - Search (active pane).
+• Ctrl+L - Jump to the Command Line bar (see COMMAND LINE above), showing
+  it first if it's currently hidden.
 • Ctrl+Tab or Ctrl+O - Switch Active Pane, same as clicking into the other
   one. Not plain Tab: Fyne itself intercepts that for cycling focus between
   controls, before this app ever sees it. Ctrl+O is there as a fallback on
@@ -434,6 +455,11 @@ KNOWN LIMITATIONS:
 • Escape-to-cancel (above) covers every dialog in the main window, but not
   the separate built-in text editor window's own Unsaved Changes / Save As
   prompts yet.
+• Clicking a tab that's already selected doesn't make its pane the active
+  one (a Fyne limitation — the tab strip only reports a change when the
+  selected tab actually changes). If the Command Line bar seems to be
+  acting on the wrong pane, click any row in the file list you actually
+  want active first — that always works.
 
 MORE INFORMATION:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

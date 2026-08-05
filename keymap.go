@@ -142,6 +142,19 @@ func (c *commander) registerShortcuts() {
 	toggleActivePane := func(fyne.Shortcut) { c.toggleActivePane() }
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyTab, Modifier: desktop.ControlModifier}, toggleActivePane)
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyO, Modifier: desktop.ControlModifier}, toggleActivePane)
+
+	// Focus the command line (cmdline_ui.go): Ctrl+L, matching the browser
+	// convention for "focus the location/command bar" (Firefox/Chrome both
+	// use Ctrl+L for their address bar) — unused elsewhere in this app, and
+	// a real modifier so it doesn't hit the triggersShortcut bug described
+	// above. Shows the bar first if it's currently hidden.
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyL, Modifier: desktop.ControlModifier},
+		func(fyne.Shortcut) {
+			if !c.showCmdLine {
+				c.toggleShowCmdLine()
+			}
+			c.win.Canvas().Focus(c.cmdEntry)
+		})
 }
 
 // keyBarButton builds one function-key bar button with a tooltip explaining
@@ -219,6 +232,9 @@ func (c *commander) doOpenMenu() {
 	driveBarItem := fyne.NewMenuItem("Show Volume/Drive Toolbar", func() { c.toggleDriveBar() })
 	driveBarItem.Checked = c.showDriveBar
 
+	cmdLineItem := fyne.NewMenuItem("Show Command Line", func() { c.toggleShowCmdLine() })
+	cmdLineItem.Checked = c.showCmdLine
+
 	briefColumnsItem := fyne.NewMenuItem("Brief Columns", nil)
 	briefColumnsItem.ChildMenu = c.buildBriefColumnsSubmenu(nil)
 
@@ -241,6 +257,7 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Change Attributes…", func() { c.showChangeAttributes() }),
 		hiddenFilesItem,
 		driveBarItem,
+		cmdLineItem,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Panel Colors…", func() {
 			showColorSchemeSettings(c.app, c.win, c.applyColorScheme)

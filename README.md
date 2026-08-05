@@ -7,6 +7,23 @@ Norton Commander / Total Commander / Nimble Commander / Midnight Commander.
 Design philosophy aligns with Fyne: ease of use, solid functionality, steady bug
 fixing and performance work.
 
+## Why this instead of Nimble/Total/Midnight Commander?
+
+Nimble Commander, Total Commander, and Midnight Commander are all genuinely
+good tools, and this project owes real debts to each of them for feature
+ideas and muscle-memory keybindings. The case for reaching for this one
+instead: it's the exact same app, with the exact same feature set, on
+Windows, macOS, and Linux — no per-OS relearning, no "that only works on
+the Windows version." **Export/Import Settings** bundles everything that
+persists (preferences, Favorites, Editors, Connections, Application
+Launcher, window/tab layout) into a single zip, so carrying your whole
+setup to a new machine, a fresh install, or across a home lab full of VMs
+is one file instead of hunting through several OS-specific locations by
+hand. Beyond that, the feature set is chosen for genuine day-to-day
+usefulness (Connections manager for SFTP/SMB/FileAgent, Application
+Launcher, Multi-Rename Tool, Change Attributes, a built-in Command Line,
+...) rather than chasing feature-parity checkboxes for their own sake.
+
 ## Features
 
 - **Dual panes, multiple tabs per pane** — each tab keeps its own directory,
@@ -152,7 +169,13 @@ fixing and performance work.
 
 - **Linux**: GNOME, KDE, XFCE, Cinnamon, MATE, etc. on X11 or Wayland.
 - **macOS**: 10.13 (High Sierra) or later.
-- **Windows**: Windows 10 or later.
+- **Windows**: Windows 10 or later. Some VMs and locked-down hosts have no
+  usable hardware OpenGL, which most Fyne apps otherwise crash or hang on
+  with no explanation — Commander automatically probes for it at launch and,
+  only if that fails, falls back to a bundled Mesa3D software renderer and
+  relaunches itself, with no user action needed. Real hardware OpenGL is
+  always preferred when available (it's faster); nothing changes on a
+  normal machine with a working GPU.
 
 ## Building & running
 
