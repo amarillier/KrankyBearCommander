@@ -26,6 +26,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hirochachacha/go-smb2"
 
@@ -91,6 +92,15 @@ func parseShareAndPath(remotePath string) (share, withinShare string, err error)
 	return share, withinShare, nil
 }
 
+// connectTimeout bounds the initial TCP dial — unlike sftpfs's
+// ssh.ClientConfig.Timeout and fileagentfs's net.Dialer.Timeout, this
+// package had no such bound at all until a stalled/unreachable SMB host
+// was found to hang the whole app indefinitely (Reload's own timeout
+// covers a stalled *read* on an already-open session, not a hung Connect
+// on a genuinely dead host — this is that same class of bug, one level
+// earlier).
+const connectTimeout = 10 * time.Second
+
 // Connect dials host:port, authenticates as conn.Username via NTLM (secret
 // is the password; conn.Domain is optional), and mounts the share named by
 // conn.RemotePath's first path component.
@@ -101,7 +111,7 @@ func Connect(conn *connections.Connection, secret string) (*FS, error) {
 	}
 
 	a := addr(conn.Host, conn.Port)
-	netConn, err := net.Dial("tcp", a)
+	netConn, err := net.DialTimeout("tcp", a, connectTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", a, err)
 	}

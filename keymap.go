@@ -251,6 +251,7 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { c.swapPanes() }),
 		fyne.NewMenuItem("Calculate Folder Sizes", func() { c.doCalculateFolderSizes() }),
 		fyne.NewMenuItem("Search… (Ctrl+F)", func() { c.showSearch(c.activePane()) }),
+		fyne.NewMenuItem("Compare/Synchronize Directories…", func() { c.showCompareSync(comparePrimaryNone) }),
 		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { c.doCopyToClipboard() }),
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { c.doPaste() }),
 		fyne.NewMenuItem("Multi-Rename Tool… (Ctrl+M)", func() { c.showMultiRenameTool() }),

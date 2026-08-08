@@ -17,7 +17,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "1.2.0" // see FyneApp.toml
+	appVersion = "1.3.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -137,6 +137,7 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
 		fyne.NewMenuItem("Search… (active pane) (Ctrl+F)", func() { cmdr.showSearch(cmdr.activePane()) }),
+		fyne.NewMenuItem("Compare/Synchronize Directories…", func() { cmdr.showCompareSync(comparePrimaryNone) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { cmdr.doCopyToClipboard() }),
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { cmdr.doPaste() }),

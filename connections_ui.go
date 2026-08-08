@@ -10,6 +10,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 
 	"commander/internal/connections"
 	"commander/internal/panelstate"
+	"commander/internal/vfs"
 	"commander/internal/vfs/fileagentfs"
 	"commander/internal/vfs/sftpfs"
 	"commander/internal/vfs/smbfs"
@@ -363,6 +365,30 @@ func (c *commander) connectTo(conn connections.Connection, target *pane, onConne
 		c.connectFileAgent(&conn, secret, target, onConnected, onFailed)
 	default:
 		c.connectSFTP(&conn, secret, target, onConnected, onFailed)
+	}
+}
+
+// reconnectConnection re-establishes a saved connection by ID — the same
+// credential lookup connectTo does before opening a brand-new tab, but
+// returning the fresh backend directly instead, for a live tab whose
+// session died (see fileListView.retryFailedPath/reconnectAndRetry). No
+// host-key trust-prompt step for SFTP here: sftpfs.Connect already
+// verifies against conn.TrustedHostKeyFingerprint internally, and that
+// fingerprint was already established the first time this connection was
+// ever used — a reconnect isn't a first contact with an unrecognized host.
+func (c *commander) reconnectConnection(connID string) (vfs.FileSystem, error) {
+	conn, ok := c.connectionConfig.FindByID(connID)
+	if !ok {
+		return nil, errors.New("this saved connection no longer exists")
+	}
+	secret, _ := connections.GetSecret(conn.ID)
+	switch conn.Protocol {
+	case "smb":
+		return smbfs.Connect(&conn, secret)
+	case "fileagent":
+		return fileagentfs.Connect(&conn, secret)
+	default:
+		return sftpfs.Connect(&conn, secret)
 	}
 }
 

@@ -102,15 +102,25 @@ type fileListView struct {
 	failedPath string
 	failedFS   vfs.FileSystem
 
-	// retryBanner/retryLabel: a small bar shown above the listing while
-	// unavailable is set, with a Retry button — see updateRetryBanner.
-	// Fyne's DocTabs tab button can't be extended to make the tab's own
-	// warning icon clickable (unexported type, no hook beyond Tapped/
-	// Hoverable — see the tab-drag/right-click scoping notes elsewhere in
-	// this app's history), so the retry affordance lives here instead,
-	// in content this view fully owns.
+	// retryBanner/retryLabel/retryBtn: a small bar shown above the listing
+	// while unavailable is set, with a Retry button — see
+	// updateRetryBanner. Fyne's DocTabs tab button can't be extended to
+	// make the tab's own warning icon clickable (unexported type, no hook
+	// beyond Tapped/Hoverable — see the tab-drag/right-click scoping notes
+	// elsewhere in this app's history), so the retry affordance lives here
+	// instead, in content this view fully owns.
 	retryBanner *fyne.Container
 	retryLabel  *widget.Label
+	retryBtn    *widget.Button
+
+	// onReconnect re-establishes a Commander-managed connection (SFTP/SMB/
+	// FileAgent) by ConnectionID — wired by paneview.go to commander.
+	// reconnectConnection. nil for a plain local/OS-mounted path, in which
+	// case retryFailedPath falls back to its simple re-read behavior.
+	onReconnect func(connID string) (vfs.FileSystem, error)
+	// reconnecting guards against a second Retry click firing a duplicate
+	// in-flight reconnect attempt (each spawns a real network connection).
+	reconnecting bool
 
 	// cursorInfoGen guards cursorInfo's background child-count fetch (see
 	// there) — bumped every time the cursor/selection changes, so a slow
@@ -182,8 +192,9 @@ func (v *fileListView) Build() fyne.CanvasObject {
 	v.root = container.NewStack()
 
 	v.retryLabel = widget.NewLabel("")
-	retryBtn := widget.NewButton("Retry", func() { v.retryFailedPath() })
-	v.retryBanner = container.NewBorder(nil, nil, nil, retryBtn, v.retryLabel)
+	v.retryLabel.Importance = widget.DangerImportance
+	v.retryBtn = widget.NewButton("Retry", func() { v.retryFailedPath() })
+	v.retryBanner = container.NewBorder(nil, nil, nil, v.retryBtn, v.retryLabel)
 	v.retryBanner.Hide()
 
 	v.Reload()
@@ -345,20 +356,81 @@ func (v *fileListView) updateRetryBanner() {
 }
 
 // retryFailedPath re-attempts whatever Reload last timed out on — the
-// retry banner's button action. Restores failedFS first: a timeout can
-// leave v.fs pointed at a different backend than the failed path actually
-// belongs to (e.g. a connection tab's very first read timing out, before
-// any lastGood exists, falls back to a LOCAL home directory — retrying
-// through that local fs would try to read a remote-shaped path through the
-// wrong backend entirely).
+// retry banner's button action. For one of Commander's own SFTP/SMB/
+// FileAgent connection tabs (identified via the same hasConnectionID
+// marker interface fileops_ui.go already uses for Favorites), this does a
+// REAL reconnect first (reconnectAndRetry): v.failedFS may already be
+// closed (handleReadTimeout's fallback-to-home path explicitly closes it
+// via adjustFSForTarget) or otherwise dead, so replaying the request
+// through it would just fail again immediately — a fresh Connect using
+// the saved connection's own credentials is the only thing that can
+// actually work. For a plain local/OS-mounted path, this just restores
+// failedFS (a timeout can leave v.fs pointed at a different backend than
+// the failed path actually belongs to — e.g. a connection tab's very
+// first read timing out, before any lastGood exists, falls back to a
+// LOCAL home directory) and re-reads.
 func (v *fileListView) retryFailedPath() {
-	if v.failedPath == "" {
+	if v.failedPath == "" || v.reconnecting {
+		return
+	}
+	if idFS, ok := v.failedFS.(hasConnectionID); ok && v.onReconnect != nil {
+		v.reconnectAndRetry(idFS.ConnectionID())
 		return
 	}
 	if v.failedFS != nil {
 		v.fs = v.failedFS
 	}
 	v.JumpTo(v.failedPath)
+}
+
+// reconnectAndRetry runs onReconnect (a real network connect — a few
+// seconds, but already internally time-bounded per backend, so no
+// additional select/timeout wrapper is needed here the way Reload needs
+// one for an untimed ReadDir) in the background, then, on success, swaps
+// in the fresh backend and retries the failed path — reusing Reload's own
+// async, timeout-protected path via JumpTo. On failure, leaves the tab
+// exactly where it already safely reverted to, with a clear status
+// message instead of a silent retry loop.
+func (v *fileListView) reconnectAndRetry(connID string) {
+	v.reconnecting = true
+	v.retryBtn.Disable()
+	v.retryLabel.SetText("Reconnecting...")
+	path, onReconnect := v.failedPath, v.onReconnect
+
+	// Close the dead session BEFORE attempting a fresh one, not after: it
+	// was never cleanly closed when the network first dropped (just
+	// abandoned mid-air, not a graceful Close), and some servers still
+	// count an unclosed session as active — an immediate new connect
+	// right alongside a lingering dead one can be flaky in a way a plain
+	// fresh connect isn't. Same as closeFS/adjustFSForTarget elsewhere in
+	// this file, this runs synchronously (a network teardown, not
+	// expected to itself hang the way an unbounded read could).
+	if sf, ok := v.failedFS.(swappableFS); ok {
+		sf.Close()
+	}
+
+	go func() {
+		fs, err := onReconnect(connID)
+		fyne.Do(func() {
+			v.reconnecting = false
+			if v.closed {
+				if sf, ok := fs.(swappableFS); ok {
+					sf.Close()
+				}
+				return
+			}
+			v.retryBtn.Enable()
+			if err != nil {
+				if v.onStatus != nil {
+					v.onStatus("reconnect failed: " + err.Error())
+				}
+				v.updateRetryBanner()
+				return
+			}
+			v.fs = fs
+			v.JumpTo(path)
+		})
+	}()
 }
 
 // handleReadTimeout reverts to the last directory that actually read

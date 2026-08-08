@@ -5,6 +5,53 @@ Later phase someday maybe if practical - low priority now
 - maybe right click tab to duplicate, rename, duplicate or move to other pane - this adds complexity with a complete pane handling rewrite, defer
 - drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
 
+Version 1.3.0 - August 08, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Compare/Synchronize Directories (File menu / F9 popup, or the new
+   toolbar button on each pane) — compares the two panes' current
+   directories (this level only, not subfolders) and lists every file
+   that's missing on one side or differs in size/date, each with a
+   Skip / Copy → Right / Copy ← Left / Delete choice per row (a file
+   missing on one side offers Delete-that-copy as an alternative to
+   copying it across; delete is real on a connection tab — no trash on
+   the other end, same as F8 there). Opening it from the File menu/F9
+   popup gives neutral defaults (missing-on-one-side copies across,
+   differs-on-both defaults to Skip); clicking a specific pane's own
+   toolbar button instead treats THAT pane as the source of truth —
+   its own files always win (copy/overwrite the other side), and
+   whatever only the OTHER side has defaults to Delete instead of being
+   pulled across, so a click on the left or right button suggests exactly
+   what you'd expect for "make the other side match this one." Synchronize
+   runs whatever's still set to a non-Skip action, using the exact same
+   machinery F5 Copy/F8 Delete already use — works across any combination
+   of backends (local, SFTP, SMB, FileAgent), with the normal
+   Overwrite/Skip/Rename/Cancel conflict handling for copies. Its toolbar
+   button is "⇄" — no built-in icon depicts compare/sync, so this uses a
+   plain glyph rather than reusing the refresh icon, which looked
+   confusingly like an actual refresh button; each pane's main toolbar
+   also gained a real refresh button (same as F2/Ctrl+R/the drive bar's
+   own ⟳) now that a second refresh-looking icon there would've been
+   genuinely useful anyway.
+✨ NEW A tab flagged unavailable (see 1.2.0's freeze fix) now shows a
+   "<location> isn't responding" banner with a Retry button right above
+   its listing, instead of only the tab's own small warning icon — Fyne's
+   tab strip can't be extended to make that icon itself clickable, so the
+   explicit retry action lives in the file list area instead, which
+   Commander fully owns. Retry re-attempts the exact location that timed
+   out, through the correct backend even if the tab had since fallen back
+   to a completely different one (e.g. a connection tab's first-ever read
+   timing out before landing on your local home directory).
+✨ NEW That same Retry button now does a REAL reconnect for one of
+   Commander's own SFTP/SMB/FileAgent connections (Connections manager),
+   instead of just retrying through a session that may already be dead —
+   it fetches that saved connection's credentials fresh and re-establishes
+   it, then picks up right back where it left off. Shows "Reconnecting…"
+   while it's in flight, and a clear message if it fails (including if the
+   saved connection has since been deleted) rather than hanging or retrying
+   silently forever. Also fixed: SMB's own Connect had no timeout at all
+   until now (SFTP and FileAgent already did) — a truly unreachable SMB
+   host could otherwise hang a reconnect attempt indefinitely.
+
 Version 1.2.0 - August 08, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✨ NEW Fixed a real, reproducible whole-app freeze: browsing a directory
