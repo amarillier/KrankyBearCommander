@@ -52,6 +52,11 @@ type pane struct {
 	lockBtn     *ttwidget.Button
 	driveBar    *container.Scroll
 
+	// driveRootsGen guards buildDriveBarContent's background Roots() fetch
+	// (see there) against a stale/superseded result — bumped every time the
+	// drive bar is (re)built, e.g. by a quick double Refresh.
+	driveRootsGen int
+
 	lastCursorInfo string
 	lastSelCount   int
 	lastSelSize    int64
@@ -206,6 +211,7 @@ func (p *pane) newTabItem(state *panelstate.State) *container.TabItem {
 	p.bindView(view)
 
 	item := container.NewTabItem(tabLabel(state), view.Build())
+	item.Icon = tabIcon(view)
 	p.views = append(p.views, view)
 	p.states = append(p.states, state)
 	return item
@@ -263,6 +269,7 @@ func (p *pane) addTabFromStateWithFS(state *panelstate.State, fs vfs.FileSystem)
 	view := newFileListView(fs, state, p.colors, p.showHidden, p.briefColumns, p.defaultHome, p.isActivePane)
 	p.bindView(view)
 	item := container.NewTabItem(tabLabel(state), view.Build())
+	item.Icon = tabIcon(view)
 	p.views = append(p.views, view)
 	p.states = append(p.states, state)
 	p.tabs.Append(item)
@@ -282,6 +289,18 @@ func tabLabel(state *panelstate.State) string {
 		return "🔒 " + name
 	}
 	return name
+}
+
+// tabIcon flags a tab whose last read timed out (see fileListView.
+// handleReadTimeout/setUnavailable) — cleared the moment a subsequent read
+// succeeds. Deliberately no icon at all for the common, healthy case rather
+// than a permanent "OK" marker on every tab, matching tabLabel's own
+// only-show-🔒-when-locked convention above.
+func tabIcon(view *fileListView) fyne.Resource {
+	if view.unavailable {
+		return theme.WarningIcon()
+	}
+	return nil
 }
 
 func lastPathComponent(path string) string {
@@ -361,12 +380,40 @@ func (p *pane) buildDriveBarContent() fyne.CanvasObject {
 	})
 	refreshBtn.SetToolTip("Refresh both panes (F2) and re-scan for newly connected drives")
 
-	items := []fyne.CanvasObject{homeBtn, upBtn, refreshBtn, widget.NewSeparator()}
+	bar := container.NewHBox(homeBtn, upBtn, refreshBtn, widget.NewSeparator())
 
-	roots, err := p.fs.Roots()
-	if err != nil {
-		roots = nil
-	}
+	// Roots() lists mounted volumes (localfs.Roots walks /Volumes or
+	// /media on macOS/Linux) — this can hang for a long time if it
+	// contains an unresponsive network mount, the same class of risk
+	// Reload's own directory read has (see its doc comment in filelist.go).
+	// Fetching it in the background means a stalled mount only delays the
+	// drive buttons appearing, rather than freezing the rest of the UI —
+	// this hit for real via F2/Refresh (onRefreshAll above) while
+	// diagnosing that same class of bug.
+	p.driveRootsGen++
+	gen := p.driveRootsGen
+	go func() {
+		roots, err := p.fs.Roots()
+		if err != nil {
+			return
+		}
+		fyne.Do(func() {
+			if p.driveRootsGen != gen {
+				return // superseded by a newer rescan
+			}
+			p.appendDriveButtons(bar, roots)
+			bar.Refresh()
+		})
+	}()
+
+	return bar
+}
+
+// appendDriveButtons adds one button per root onto bar — split out of
+// buildDriveBarContent so its background Roots() completion (see there)
+// can call it once the fetch actually lands.
+func (p *pane) appendDriveButtons(bar *fyne.Container, roots []string) {
+	unfocus := func() { p.win.Canvas().Unfocus() }
 	for _, r := range roots {
 		root := r
 		driveBtn := newDriveButton(root, func() {
@@ -380,10 +427,8 @@ func (p *pane) buildDriveBarContent() fyne.CanvasObject {
 			p.showDriveContextMenu(root, pos)
 		})
 		driveBtn.SetToolTip("Jump to " + root + " (right-click for Eject/Format)")
-		items = append(items, driveBtn)
+		bar.Add(driveBtn)
 	}
-
-	return container.NewHBox(items...)
 }
 
 // rescanDriveBar rebuilds the volume/drive toolbar's buttons from a fresh
@@ -475,6 +520,7 @@ func (p *pane) refreshChrome() {
 	state := p.states[idx]
 	item := p.tabs.Items[idx]
 	item.Text = tabLabel(state)
+	item.Icon = tabIcon(p.views[idx])
 	p.tabs.Refresh()
 
 	if state.Locked {

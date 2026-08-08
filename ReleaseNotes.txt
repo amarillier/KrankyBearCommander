@@ -2,8 +2,28 @@ Future ideas:
 
 Later phase someday maybe if practical - low priority now
 - possibly allow dragging tabs within a pane to reorder - this adds complexity with a complete pane handling rewrtite, defer
-- maybe right click tab to duplicate, rename, duplicate or move to other pane - this adds complexity with a complete pane handling rewrtite, defer
+- maybe right click tab to duplicate, rename, duplicate or move to other pane - this adds complexity with a complete pane handling rewrite, defer
 - drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+
+Version 1.2.0 - August 08, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Fixed a real, reproducible whole-app freeze: browsing a directory
+   backed by a stalled network mount (an OS-level SMB/NFS share gone
+   unreachable, or one of Commander's own SFTP/SMB/FileAgent connection
+   tabs) could hang the entire app indefinitely, not just the affected
+   tab — Fyne has no separate thread per pane, and a couple of directory
+   reads ran directly on its single UI thread with no timeout. Both are
+   now backgrounded with an 8-second timeout: navigating (or F2/hidden-
+   files/brief-columns, which reload every open tab) reverts to wherever
+   that tab last actually read successfully (or your home directory, if
+   it never had one this session) instead of hanging; the status line's
+   cursor-row item count (which did its own separate, un-timed read) now
+   fills in the count in the background instead of blocking. The volume/
+   drive toolbar's "list mounted volumes" scan (pane construction and
+   every F2/Refresh) got the same fix. A tab whose last read timed out
+   also now shows a small warning icon next to its name, clearing the
+   moment a subsequent read succeeds — a stalled connection is visible at
+   a glance instead of only a transient status-bar message.
 
 Version 1.1.0 - August 05, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

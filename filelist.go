@@ -71,6 +71,53 @@ type fileListView struct {
 	entries   []vfs.Entry // current directory's entries, sorted, excluding ".."
 	hasParent bool
 
+	// reloadGen/closed/lastGood* support Reload's non-blocking read (see its
+	// doc comment): reloadGen is bumped at the start of every Reload call
+	// (and again on a timeout) so a stale background completion can tell
+	// it's no longer wanted; closed is set by closeFS so a completion for an
+	// already-closed tab is discarded rather than touching a dead view;
+	// lastGoodFS/lastGoodPath are the fs/path a read last actually
+	// succeeded against, snapshotted on every success — what a timed-out
+	// read reverts to.
+	reloadGen    int
+	closed       bool
+	lastGoodFS   vfs.FileSystem
+	lastGoodPath string
+
+	// unavailable is set once a Reload times out (see handleReadTimeout)
+	// and cleared once a subsequent read succeeds (handleReadResult) — the
+	// tab strip shows a warning icon while it's set (see paneview.go's
+	// tabIcon), so a stalled network mount is visible at a glance rather
+	// than only a transient status-bar message.
+	unavailable bool
+
+	// failedPath/failedFS are what a timed-out read was actually for (see
+	// handleReadTimeout) — what retryFailedPath re-attempts. Tracked
+	// separately from lastGoodFS/lastGoodPath (which point at whatever the
+	// tab reverted TO) since they can be a different backend entirely: a
+	// connection tab's very first read timing out, before any lastGood
+	// exists, falls back to a LOCAL home directory, and a naive retry from
+	// the now-local v.fs would try to read a remote-shaped path through the
+	// wrong backend.
+	failedPath string
+	failedFS   vfs.FileSystem
+
+	// retryBanner/retryLabel: a small bar shown above the listing while
+	// unavailable is set, with a Retry button — see updateRetryBanner.
+	// Fyne's DocTabs tab button can't be extended to make the tab's own
+	// warning icon clickable (unexported type, no hook beyond Tapped/
+	// Hoverable — see the tab-drag/right-click scoping notes elsewhere in
+	// this app's history), so the retry affordance lives here instead,
+	// in content this view fully owns.
+	retryBanner *fyne.Container
+	retryLabel  *widget.Label
+
+	// cursorInfoGen guards cursorInfo's background child-count fetch (see
+	// there) — bumped every time the cursor/selection changes, so a slow
+	// count for a row the cursor has since left doesn't land on the wrong
+	// row's status text.
+	cursorInfoGen int
+
 	// computedSizes/computedParentSize hold "Calculate Folder Sizes" results
 	// (see foldersize_ui.go): recursive du -s-style totals for directories,
 	// which otherwise just show "<DIR>", and for the current directory
@@ -133,12 +180,38 @@ func (v *fileListView) Build() fyne.CanvasObject {
 		newColumnResizeHandle(colSize, fitWidth(colSize)), newColumnResizeHandle(colModified, fitWidth(colModified)))
 	v.headerRow = container.NewStack(labels, handles)
 	v.root = container.NewStack()
+
+	v.retryLabel = widget.NewLabel("")
+	retryBtn := widget.NewButton("Retry", func() { v.retryFailedPath() })
+	v.retryBanner = container.NewBorder(nil, nil, nil, retryBtn, v.retryLabel)
+	v.retryBanner.Hide()
+
 	v.Reload()
-	return v.root
+	return container.NewBorder(v.retryBanner, nil, nil, nil, v.root)
 }
 
+// reloadTimeout bounds how long Reload waits for a directory read before
+// giving up and reverting — see Reload's doc comment.
+const reloadTimeout = 8 * time.Second
+
 // Reload re-reads the directory from disk, re-sorts, and re-renders whichever
-// view mode is active.
+// view mode is active. The read itself runs in a background goroutine with a
+// timeout, never blocking Fyne's UI goroutine: a stalled network mount (an
+// OS-level SMB/NFS share gone unreachable, a dead SFTP/SMB/FileAgent
+// connection) can hang a directory read for a very long time at the OS
+// level, and since Fyne has no separate thread per pane, a single blocking
+// read used to freeze the ENTIRE app, not just the affected tab.
+//
+// Go can't cancel a goroutine stuck in a hung syscall — there's no
+// context.Context anywhere in vfs.FileSystem, for any backend — so the
+// timeout only stops the UI from waiting on it; the underlying blocked read
+// keeps running (leaked) until the OS gives up or the app quits, the same
+// tradeoff cmdline_ui.go's runCapturedCommand already accepts for a
+// long-running shell command.
+//
+// reloadGen/closed (see the struct's doc comment) guard against a background
+// completion arriving after it no longer applies — a newer Reload call
+// superseded it, or the tab closed in the meantime.
 func (v *fileListView) Reload() {
 	prevRowCount := v.rowCount()
 
@@ -146,44 +219,190 @@ func (v *fileListView) Reload() {
 	// be replaced wholesale — nothing currently commits/cancels it first
 	// (Reload can run for unrelated reasons, e.g. F2, another tab's
 	// operation finishing), so just drop it rather than risk it dangling
-	// against a row that may no longer exist.
+	// against a row that may no longer exist. Repaint right away with
+	// whatever's already on hand so dropping it still looks instant, even
+	// though the fresh read below now finishes later, not inline.
 	v.renaming = nil
 	v.activeRenameField = nil
+	v.renderActiveView()
 
 	v.computedSizes = nil
 	v.computedParentSize = nil
-	entries, err := v.fs.ReadDir(v.state.Path)
+
+	v.reloadGen++
+	gen := v.reloadGen
+	path, fs := v.state.Path, v.fs
+
+	if v.onStatus != nil {
+		v.onStatus("Reading " + path + "...")
+	}
+
+	type readResult struct {
+		entries []vfs.Entry
+		err     error
+	}
+	done := make(chan readResult, 1)
+	go func() {
+		entries, err := fs.ReadDir(path)
+		done <- readResult{entries, err}
+	}()
+
+	go func() {
+		select {
+		case r := <-done:
+			fyne.Do(func() {
+				if v.closed || v.reloadGen != gen {
+					return // superseded or the tab closed — discard
+				}
+				v.handleReadResult(path, fs, r.entries, r.err, prevRowCount)
+			})
+		case <-time.After(reloadTimeout):
+			fyne.Do(func() {
+				if v.closed || v.reloadGen != gen {
+					return
+				}
+				// Also invalidates gen for THIS attempt, so if the read
+				// above eventually does complete, it's discarded too —
+				// once we've given up and reverted, a late straggler
+				// shouldn't silently un-revert the tab later.
+				v.reloadGen++
+				v.handleReadTimeout(path, fs)
+			})
+		}
+	}()
+}
+
+// handleReadResult applies a completed read — success, or an error. The
+// "directory vanished" case (most commonly an unmounted/disconnected drive,
+// USB or network, the tab was sitting in or locked to) re-enters Reload
+// (against defaultHome, a fresh generation) rather than blocking on a second
+// inline read; any other error (permission denied, a real network timeout,
+// ...) is left for the user to see rather than silently working around.
+func (v *fileListView) handleReadResult(path string, fs vfs.FileSystem, entries []vfs.Entry, err error, prevRowCount int) {
 	if err != nil && vfs.IsNotExist(err) && v.defaultHome != nil {
-		// The tab's directory has genuinely vanished from under it — most
-		// commonly an unmounted/disconnected drive (USB, network share) it
-		// was sitting in or locked to — rather than leaving the pane stuck
-		// showing "no such file or directory" indefinitely, jump home. This
-		// is a Jump, not a Navigate: it works even on a fully-locked tab,
-		// and never touches Locked/LockedRoot (see panelstate.State.Jump),
-		// so a locked tab's Home button still resolves back to the very
-		// same (now-missing) locked root afterward — if the drive is
-		// reconnected later, Home (or reopening this tab) finds it again.
-		// Left alone for any other error (permission denied, a real network
-		// timeout, ...) since those are worth the user actually seeing.
-		if home := v.defaultHome(); home != "" && home != v.state.Path {
-			oldPath := v.state.Path
+		// This is a Jump, not a Navigate: it works even on a fully-locked
+		// tab, and never touches Locked/LockedRoot (see
+		// panelstate.State.Jump), so a locked tab's Home button still
+		// resolves back to the very same (now-missing) locked root
+		// afterward — if the drive is reconnected later, Home (or
+		// reopening this tab) finds it again.
+		if home := v.defaultHome(); home != "" && home != path {
 			v.adjustFSForTarget(home)
 			v.state.Jump(home)
 			if v.onStatus != nil {
-				v.onStatus(oldPath + " is no longer available — moved to home")
+				v.onStatus(path + " is no longer available — moved to home")
 			}
 			if v.onNavigated != nil {
 				v.onNavigated()
 			}
-			entries, err = v.fs.ReadDir(v.state.Path)
+			v.Reload()
+			return
 		}
 	}
 	if err != nil {
 		if v.onStatus != nil {
-			v.onStatus("cannot read " + v.state.Path + ": " + err.Error())
+			v.onStatus("cannot read " + path + ": " + err.Error())
 		}
 		entries = nil
+	} else {
+		v.lastGoodFS, v.lastGoodPath = fs, path
+		v.setUnavailable(false)
 	}
+	v.applyEntries(entries, prevRowCount)
+}
+
+// setUnavailable updates v.unavailable and, if it actually changed, tells
+// paneview to refresh this tab's chrome (icon included, see tabIcon) —
+// avoids redundant refreshes when a read succeeds while the tab was already
+// considered available. Also shows/hides the retry banner (updateRetryBanner)
+// and, on recovery, drops the now-stale failedPath/failedFS.
+func (v *fileListView) setUnavailable(unavailable bool) {
+	if v.unavailable == unavailable {
+		return
+	}
+	v.unavailable = unavailable
+	if !unavailable {
+		v.failedPath, v.failedFS = "", nil
+	}
+	v.updateRetryBanner()
+	if v.onNavigated != nil {
+		v.onNavigated()
+	}
+}
+
+// updateRetryBanner reflects v.unavailable/v.failedPath into the retry
+// banner built in Build() — a no-op if called before Build() has run.
+func (v *fileListView) updateRetryBanner() {
+	if v.retryBanner == nil {
+		return
+	}
+	if v.unavailable {
+		v.retryLabel.SetText(v.failedPath + " isn't responding")
+		v.retryBanner.Show()
+	} else {
+		v.retryBanner.Hide()
+	}
+}
+
+// retryFailedPath re-attempts whatever Reload last timed out on — the
+// retry banner's button action. Restores failedFS first: a timeout can
+// leave v.fs pointed at a different backend than the failed path actually
+// belongs to (e.g. a connection tab's very first read timing out, before
+// any lastGood exists, falls back to a LOCAL home directory — retrying
+// through that local fs would try to read a remote-shaped path through the
+// wrong backend entirely).
+func (v *fileListView) retryFailedPath() {
+	if v.failedPath == "" {
+		return
+	}
+	if v.failedFS != nil {
+		v.fs = v.failedFS
+	}
+	v.JumpTo(v.failedPath)
+}
+
+// handleReadTimeout reverts to the last directory that actually read
+// successfully (or defaultHome, if this tab has never had one yet — e.g. a
+// saved layout tab restored pointing at a connection that's since gone bad).
+// v.entries already holds that reverted target's own listing — it's only
+// ever overwritten on a successful read — so this just fixes up state/fs and
+// repaints, without reading anything again.
+func (v *fileListView) handleReadTimeout(path string, fs vfs.FileSystem) {
+	v.failedPath, v.failedFS = path, fs
+	v.setUnavailable(true)
+	switch {
+	case v.lastGoodPath != "" && v.lastGoodPath != path:
+		v.fs = v.lastGoodFS
+		v.state.Jump(v.lastGoodPath)
+		if v.onStatus != nil {
+			v.onStatus(path + " isn't responding — reverted to " + v.lastGoodPath)
+		}
+		if v.onNavigated != nil {
+			v.onNavigated()
+		}
+	case v.lastGoodPath == "" && v.defaultHome != nil:
+		if home := v.defaultHome(); home != "" && home != path {
+			v.adjustFSForTarget(home)
+			v.state.Jump(home)
+			if v.onStatus != nil {
+				v.onStatus(path + " isn't responding — opened your home directory instead")
+			}
+			if v.onNavigated != nil {
+				v.onNavigated()
+			}
+		}
+	default:
+		if v.onStatus != nil {
+			v.onStatus(path + " isn't responding")
+		}
+	}
+	v.renderActiveView()
+}
+
+// applyEntries filters/sorts/renders a completed read's entries — shared by
+// the normal success path and handleReadResult's "directory vanished"
+// re-entry.
+func (v *fileListView) applyEntries(entries []vfs.Entry, prevRowCount int) {
 	if v.showHidden != nil && !v.showHidden() {
 		entries = visibleEntries(entries)
 	}
@@ -1310,6 +1529,11 @@ func (v *fileListView) adjustFSForTarget(target string) {
 // one swapped in — called when its tab closes (see paneview.go's
 // CloseIntercept), since nothing else would ever navigate it back out.
 func (v *fileListView) closeFS() {
+	// Marks this view done for any Reload background completion still in
+	// flight (see the reloadGen/closed doc comment on the struct and on
+	// Reload) — closing the tab shouldn't have a late read result reach
+	// back in and touch a view that's no longer on screen.
+	v.closed = true
 	if sf, ok := v.fs.(swappableFS); ok {
 		sf.Close()
 	}
@@ -1427,8 +1651,9 @@ func (v *fileListView) reportSelection() {
 		}
 		v.onSelection(selCount, selSize, totalCount, totalSize)
 	}
+	v.cursorInfoGen++
 	if v.onCursorInfo != nil {
-		v.onCursorInfo(v.cursorInfo())
+		v.onCursorInfo(v.cursorInfo(v.cursorInfoGen))
 	}
 }
 
@@ -1437,7 +1662,15 @@ func (v *fileListView) reportSelection() {
 // (not recursive — cheap even for huge trees). Falls back to the current
 // path when there's no cursor (fresh tab, or after a Reload with an
 // empty directory).
-func (v *fileListView) cursorInfo() string {
+//
+// For a directory, the item count is a SEPARATE ReadDir call from the one
+// that listed the current directory — this used to run inline, right here,
+// and could hang the entire UI exactly like Reload's own read could (same
+// stalled-network-mount risk, e.g. an OS-level SMB/NFS mount gone
+// unreachable), just triggered by cursor movement rather than navigation.
+// The row's name/kind shows immediately; fetchChildCount fills in the count
+// in the background once (if) it arrives.
+func (v *fileListView) cursorInfo(gen int) string {
 	switch v.state.Cursor {
 	case "":
 		return v.state.Path
@@ -1449,13 +1682,34 @@ func (v *fileListView) cursorInfo() string {
 		return v.state.Path
 	}
 	if entry.IsDir {
-		children, err := v.fs.ReadDir(v.fs.Join(v.state.Path, entry.Name))
-		if err != nil {
-			return entry.Name + "  <DIR>"
-		}
-		return fmt.Sprintf("%s  <DIR>  %d item(s)", entry.Name, len(children))
+		v.fetchChildCount(gen, entry.Name)
+		return entry.Name + "  <DIR>"
 	}
 	return fmt.Sprintf("%s  %s  %s", entry.Name, humanSize(entry.Size), entry.ModTime.Format("2006-01-02 15:04"))
+}
+
+// fetchChildCount reads dirName's own immediate item count in the
+// background and updates the status line once it lands, but only if gen
+// still matches v.cursorInfoGen (the cursor/selection hasn't changed since)
+// and the tab hasn't closed. Fire-and-forget, unlike Reload's timeout+
+// revert: there's nothing to revert to here (this never changes what's
+// displayed, only a status string), so if the read hangs it's simply never
+// applied — same accepted "leaked until the OS gives up" tradeoff as
+// Reload and cmdline_ui.go's runCapturedCommand.
+func (v *fileListView) fetchChildCount(gen int, name string) {
+	fs, dir := v.fs, v.fs.Join(v.state.Path, name)
+	go func() {
+		children, err := fs.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		fyne.Do(func() {
+			if v.closed || v.cursorInfoGen != gen || v.onCursorInfo == nil {
+				return
+			}
+			v.onCursorInfo(fmt.Sprintf("%s  <DIR>  %d item(s)", name, len(children)))
+		})
+	}()
 }
 
 // SelectionOrCursorNames is SelectionOrCursor's counterpart in terms of bare
