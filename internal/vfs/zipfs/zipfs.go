@@ -246,7 +246,7 @@ func (fs *FS) Roots() ([]string, error) { return []string{fs.zipPath}, nil }
 // it unmodified.
 func (fs *FS) Extract(sources []string, destDir string, progress fsops.ProgressFunc, resolve fsops.ConflictFunc) error {
 	if progress == nil {
-		progress = func(int64, int64, string) {}
+		progress = func(int64, int64, string) bool { return true }
 	}
 	if resolve == nil {
 		resolve = func(string) (fsops.ConflictAction, string) { return fsops.ConflictOverwrite, "" }
@@ -301,7 +301,9 @@ func (fs *FS) extractNode(n *node, dest string, done *int64, total int64, progre
 		switch action {
 		case fsops.ConflictSkip:
 			*done += n.size
-			progress(*done, total, dest)
+			if !progress(*done, total, dest) {
+				return fsops.ErrCancelled
+			}
 			return nil
 		case fsops.ConflictCancel:
 			return fsops.ErrCancelled
@@ -332,7 +334,9 @@ func (fs *FS) extractNode(n *node, dest string, done *int64, total int64, progre
 				return werr
 			}
 			*done += int64(nr)
-			progress(*done, total, dest)
+			if !progress(*done, total, dest) {
+				return fsops.ErrCancelled
+			}
 		}
 		if rerr == io.EOF {
 			break

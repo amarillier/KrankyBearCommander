@@ -175,7 +175,13 @@ Launcher, Multi-Rename Tool, Change Attributes, a built-in Command Line,
   only if that fails, falls back to a bundled Mesa3D software renderer and
   relaunches itself, with no user action needed. Real hardware OpenGL is
   always preferred when available (it's faster); nothing changes on a
-  normal machine with a working GPU.
+  normal machine with a working GPU. The installer bundles this fallback
+  automatically. The **portable (zip) Windows build does not** — if you're
+  running the portable version on a machine without hardware OpenGL, grab
+  `mesa-fallback.zip` from the same release, extract it into a
+  `mesa-fallback` folder next to `KrankyBearCommander.exe`, and the same
+  automatic fallback applies. Most users on a normal machine will never
+  need this file at all.
 
 ## Building & running
 

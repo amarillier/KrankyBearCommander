@@ -455,9 +455,10 @@ func TestProgressReportsCumulativeBytes(t *testing.T) {
 
 	var lastDone, lastTotal int64
 	var calls int
-	err := Copy([]string{filepath.Join(src, "a.txt")}, dst, func(done, total int64, _ string) {
+	err := Copy([]string{filepath.Join(src, "a.txt")}, dst, func(done, total int64, _ string) bool {
 		calls++
 		lastDone, lastTotal = done, total
+		return true
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

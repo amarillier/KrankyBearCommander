@@ -298,13 +298,28 @@ func (c *commander) crossFSMoveOp(view, dstView *fileListView) fsOpFunc {
 		}
 		if srcSF, ok := view.fs.(remoteConnFS); ok {
 			for _, p := range sources {
+				if !progress(0, 0, "Cleaning up: "+filepath.Base(p)) {
+					return fsops.ErrCancelled
+				}
 				if err := srcSF.Remove(p); err != nil {
 					return err
 				}
 			}
 			return nil
 		}
-		return fsops.Delete(sources, true) // permanent — matches fsops.Move's own os.RemoveAll fallback, no OS trash involved
+		// permanent — matches fsops.Move's own os.RemoveAll fallback, no OS
+		// trash involved. Per-item (not per-file-inside-each-folder) so
+		// Cancel is checkable between top-level items, same granularity
+		// fsops.Delete already loops at internally.
+		for _, p := range sources {
+			if !progress(0, 0, "Cleaning up: "+filepath.Base(p)) {
+				return fsops.ErrCancelled
+			}
+			if err := fsops.Delete([]string{p}, true); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 }
 
@@ -465,12 +480,40 @@ type fsOpFunc func(sources []string, destDir string, progress fsops.ProgressFunc
 
 // runFileOp runs op in the background with a progress dialog, reloading both
 // the source pane and its opposite (the destination) when it finishes.
+// srcView/dstView are captured once, up front — not re-resolved via
+// sourcePane.activeView() at completion — so that if the user backgrounds
+// this operation and switches tabs while it's still running, completion
+// still reloads the actual tabs this operation targeted, not whatever
+// happens to be active by then.
 func (c *commander) runFileOp(verb string, sources []string, destDir string, op fsOpFunc, sourcePane *pane) {
+	srcView := sourcePane.activeView()
+	dstView := c.inactivePaneOf(sourcePane).activeView()
+
 	statusLbl := widget.NewLabel("")
 	progressBar := widget.NewProgressBar()
 	content := container.NewVBox(statusLbl, progressBar)
 	prog := dialog.NewCustomWithoutButtons(verb, content, c.win)
-	prog.Show()
+
+	var cancelled, backgrounded bool
+	bgOp := &backgroundOp{
+		description: fmt.Sprintf("%s %d item(s) to %s", verb, len(sources), destDir),
+		cancel:      func() { cancelled = true },
+		srcView:     srcView,
+		dstView:     dstView,
+	}
+
+	cancelBtn := widget.NewButton("Cancel", func() { cancelled = true })
+	bgBtn := widget.NewButton("Background", func() {
+		backgrounded = true
+		prog.Hide()
+		c.addBackgroundOp(bgOp)
+	})
+	prog.SetButtons([]fyne.CanvasObject{bgBtn, cancelBtn})
+	// Escape does the same thing the Cancel button does, rather than the
+	// generic showDialog(prog) — stops promptly with no confirmation,
+	// matching "Calculate Folder Sizes"' own Cancel precedent
+	// (foldersize_ui.go), not a heavier "are you sure?" gate.
+	showDialogWithDismiss(prog, func() { cancelled = true })
 
 	var applyToAll bool
 	var appliedAction fsops.ConflictAction
@@ -489,24 +532,47 @@ func (c *commander) runFileOp(verb string, sources []string, destDir string, op 
 		return res.action, res.newName
 	}
 
-	progress := func(done, total int64, currentPath string) {
+	progress := func(done, total int64, currentPath string) bool {
 		fyne.Do(func() {
-			statusLbl.SetText(filepath.Base(currentPath))
+			status := filepath.Base(currentPath)
+			bgOp.status = status
+			if !backgrounded {
+				statusLbl.SetText(status)
+			}
 			if total > 0 {
-				progressBar.SetValue(float64(done) / float64(total))
+				value := float64(done) / float64(total)
+				bgOp.value = value
+				if !backgrounded {
+					progressBar.SetValue(value)
+				}
 			}
 		})
+		return !cancelled
 	}
 
 	go func() {
 		err := op(sources, destDir, progress, resolve)
 		fyne.Do(func() {
-			prog.Hide()
-			if err != nil && err != fsops.ErrCancelled {
-				dialog.ShowError(err, c.win)
+			if backgrounded {
+				c.removeBackgroundOp(bgOp)
+			} else {
+				prog.Hide()
 			}
-			sourcePane.activeView().Reload()
-			c.inactivePaneOf(sourcePane).activeView().Reload()
+			if err != nil && err != fsops.ErrCancelled {
+				if fsops.IsTransientRemovableMediaError(err) {
+					dialog.ShowError(fmt.Errorf("the removable drive/card reader didn't respond to a read — this can happen briefly right after it's first inserted, before it's finished settling. Wait a few seconds and try again.\n\n(%v)", err), c.win)
+				} else {
+					dialog.ShowError(err, c.win)
+				}
+			} else if backgrounded {
+				if err == fsops.ErrCancelled {
+					c.showStatus(fmt.Sprintf("%s cancelled", verb))
+				} else {
+					c.showStatus(fmt.Sprintf("%s finished", verb))
+				}
+			}
+			srcView.Reload()
+			dstView.Reload()
 		})
 	}()
 }

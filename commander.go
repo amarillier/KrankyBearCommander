@@ -50,14 +50,17 @@ type commander struct {
 	briefColumns     int    // Brief view column count, shared across both panes (0 = Auto) — see setBriefColumns
 	sevenZipPath     string // optional 7z/7za/7zz binary override — see archive_ui.go
 
+	backgroundOps []*backgroundOp // currently-running backgrounded Copy/Move ops — see backgroundops_ui.go
+
 	left  *pane
 	right *pane
 
 	split           *container.Split
 	statusBar       *widget.Label
-	cwdLabel        *widget.Label // command bar's cwd display — see cmdline_ui.go
-	cmdEntry        *cmdEntry     // command bar's text field — see cmdline_ui.go
-	cmdOutputLabel  *widget.Label // command bar's output pane — see cmdline_ui.go
+	bgOpsIndicator  *widget.Button // "N background operation(s) running" — hidden whenever c.backgroundOps is empty, see refreshBackgroundIndicator
+	cwdLabel        *widget.Label  // command bar's cwd display — see cmdline_ui.go
+	cmdEntry        *cmdEntry      // command bar's text field — see cmdline_ui.go
+	cmdOutputLabel  *widget.Label  // command bar's output pane — see cmdline_ui.go
 	cmdOutputScroll *container.Scroll
 	cmdLineRow      fyne.CanvasObject // whole command-bar row, shown/hidden by toggleShowCmdLine
 	root            fyne.CanvasObject
@@ -72,6 +75,9 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.briefColumns = a.Preferences().IntWithFallback(prefBriefColumns, 0)
 	loadColumnWidths(a) // before any pane/view is built, so their initial SetColumnWidth calls already reflect this
 	c.statusBar = widget.NewLabel("")
+	c.bgOpsIndicator = widget.NewButton("", func() { c.showBackgroundOperations() })
+	c.bgOpsIndicator.Importance = widget.WarningImportance
+	c.bgOpsIndicator.Hide()
 
 	c.loadFavorites()
 	c.loadEditors()
@@ -79,15 +85,16 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.loadLaunchers()
 	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryLeft) })
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryRight) })
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryLeft) }, c.isPinnedByBackgroundOp)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryRight) }, c.isPinnedByBackgroundOp)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5
 
 	cmdLine := c.buildCmdLineBar()
 	keyBar := c.buildFunctionKeyBar()
-	bottom := container.NewVBox(c.statusBar, cmdLine, keyBar)
+	statusRow := container.NewBorder(nil, nil, nil, c.bgOpsIndicator, c.statusBar)
+	bottom := container.NewVBox(statusRow, cmdLine, keyBar)
 	c.root = container.NewBorder(nil, bottom, nil, nil, c.split)
 
 	c.registerShortcuts()
@@ -363,6 +370,76 @@ func (c *commander) saveLayout() {
 		SplitOffset: c.split.Offset,
 	}
 	_ = layout.Save(path, l)
+}
+
+// ── background operations (see backgroundops_ui.go) ─────────────────────────
+
+// addBackgroundOp registers op as running in the background and rebuilds
+// the main menu so its "Background Operations (N)…" label picks up the
+// new count — called once, when the user clicks "Background" on a
+// still-showing progress dialog (fileops_ui.go's runFileOp), not per
+// progress tick.
+func (c *commander) addBackgroundOp(op *backgroundOp) {
+	c.backgroundOps = append(c.backgroundOps, op)
+	c.refreshMainMenu()
+	c.refreshBackgroundIndicator()
+}
+
+// removeBackgroundOp drops op once its operation has finished (or been
+// cancelled) and rebuilds the main menu, same as addBackgroundOp.
+func (c *commander) removeBackgroundOp(op *backgroundOp) {
+	for i, o := range c.backgroundOps {
+		if o == op {
+			c.backgroundOps = append(c.backgroundOps[:i], c.backgroundOps[i+1:]...)
+			break
+		}
+	}
+	c.refreshMainMenu()
+	c.refreshBackgroundIndicator()
+}
+
+// refreshBackgroundIndicator shows/hides and relabels the status-row
+// button that's the main point of this feature being discoverable at all
+// (see the File-menu/F9/tray entries' own doc comments) — a colored
+// (WarningImportance) button that only exists while something's actually
+// running, rather than a permanently-visible piece of chrome, per Allan's
+// "no button explosion" call.
+func (c *commander) refreshBackgroundIndicator() {
+	n := len(c.backgroundOps)
+	fyne.Do(func() {
+		if n == 0 {
+			c.bgOpsIndicator.Hide()
+			return
+		}
+		label := fmt.Sprintf("%d background operation running", n)
+		if n > 1 {
+			label = fmt.Sprintf("%d background operations running", n)
+		}
+		c.bgOpsIndicator.SetText(label)
+		c.bgOpsIndicator.Show()
+	})
+}
+
+// isPinnedByBackgroundOp reports whether v is one of a currently-running
+// background operation's source/destination views — closing a tab still
+// in use by one would sever a live connection or reload the wrong view on
+// completion (see paneview.go's CloseIntercept, the guard point this
+// feeds).
+func (c *commander) isPinnedByBackgroundOp(v *fileListView) bool {
+	for _, op := range c.backgroundOps {
+		if op.srcView == v || op.dstView == v {
+			return true
+		}
+	}
+	return false
+}
+
+// refreshMainMenu rebuilds the main menu on the main thread — CLAUDE.md's
+// "never mutate/replace a window or the main menu from inside its own
+// callback" rule, same fyne.Do(func(){ win.SetMainMenu(buildMenu(...)) })
+// shape already used by the hidden-files/drive-bar/cmdline toggles.
+func (c *commander) refreshMainMenu() {
+	fyne.Do(func() { c.win.SetMainMenu(buildMenu(c.app, c.win)) })
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

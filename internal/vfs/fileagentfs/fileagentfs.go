@@ -330,7 +330,9 @@ func (fs *FS) writeAgent(virtual string, r io.Reader, done *int64, total int64, 
 				return err
 			}
 			*done += int64(n)
-			progress(*done, total, virtual)
+			if !progress(*done, total, virtual) {
+				return fsops.ErrCancelled
+			}
 		}
 		if rerr == io.EOF {
 			break
@@ -369,7 +371,7 @@ type uploadBuffer struct {
 func (u *uploadBuffer) Write(p []byte) (int, error) { return u.buf.Write(p) }
 func (u *uploadBuffer) Close() error {
 	var done int64
-	return u.fs.writeAgent(u.virtual, &u.buf, &done, int64(u.buf.Len()), func(int64, int64, string) {})
+	return u.fs.writeAgent(u.virtual, &u.buf, &done, int64(u.buf.Len()), func(int64, int64, string) bool { return true })
 }
 
 func (fs *FS) Create(p string) (io.WriteCloser, error) {
@@ -477,7 +479,7 @@ func (fs *FS) Roots() ([]string, error) {
 
 func fillDefaults(progress fsops.ProgressFunc, resolve fsops.ConflictFunc) (fsops.ProgressFunc, fsops.ConflictFunc) {
 	if progress == nil {
-		progress = func(int64, int64, string) {}
+		progress = func(int64, int64, string) bool { return true }
 	}
 	if resolve == nil {
 		resolve = func(string) (fsops.ConflictAction, string) { return fsops.ConflictOverwrite, "" }
@@ -566,7 +568,9 @@ func (fs *FS) downloadRecursive(virtual, dest string, done *int64, total int64, 
 		switch action {
 		case fsops.ConflictSkip:
 			*done += entry.Size
-			progress(*done, total, dest)
+			if !progress(*done, total, dest) {
+				return fsops.ErrCancelled
+			}
 			return nil
 		case fsops.ConflictCancel:
 			return fsops.ErrCancelled
@@ -605,6 +609,16 @@ func (fs *FS) downloadOneFile(virtual, dest string, done *int64, total int64, pr
 	out, createErr := os.Create(dest)
 	remain := head.Size
 	buf := make([]byte, maxChunk)
+	// drainRemaining discards whatever's left of the stream and reads the
+	// trailer frame, keeping the connection's frame sequence in sync for
+	// whatever runs next on this fs.mu-held connection — needed on every
+	// early-return path below, not just real errors, so cancelling a
+	// download can't desync subsequent FileAgent calls on this tab.
+	drainRemaining := func() {
+		_, _ = io.CopyN(io.Discard, fs.conn, remain)
+		var trailer msg
+		_ = readJSONFrame(fs.conn, &trailer)
+	}
 	for remain > 0 {
 		want := int64(len(buf))
 		if want > remain {
@@ -619,13 +633,17 @@ func (fs *FS) downloadOneFile(virtual, dest string, done *int64, total int64, pr
 			}
 			remain -= int64(n)
 			*done += int64(n)
-			progress(*done, total, dest)
+			if !progress(*done, total, dest) {
+				drainRemaining()
+				if out != nil {
+					out.Close()
+				}
+				return fsops.ErrCancelled
+			}
 		}
 		if err != nil {
 			// Still drain the rest so the trailer frame lines up correctly.
-			_, _ = io.CopyN(io.Discard, fs.conn, remain)
-			var trailer msg
-			_ = readJSONFrame(fs.conn, &trailer)
+			drainRemaining()
 			if out != nil {
 				out.Close()
 			}
@@ -733,7 +751,9 @@ func (fs *FS) uploadRecursive(src, virtual string, done *int64, total int64, pro
 		switch action {
 		case fsops.ConflictSkip:
 			*done += info.Size()
-			progress(*done, total, virtual)
+			if !progress(*done, total, virtual) {
+				return fsops.ErrCancelled
+			}
 			return nil
 		case fsops.ConflictCancel:
 			return fsops.ErrCancelled

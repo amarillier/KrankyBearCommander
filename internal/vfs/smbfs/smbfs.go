@@ -327,7 +327,7 @@ func (fs *FS) Roots() ([]string, error) {
 
 func fillDefaults(progress fsops.ProgressFunc, resolve fsops.ConflictFunc) (fsops.ProgressFunc, fsops.ConflictFunc) {
 	if progress == nil {
-		progress = func(int64, int64, string) {}
+		progress = func(int64, int64, string) bool { return true }
 	}
 	if resolve == nil {
 		resolve = func(string) (fsops.ConflictAction, string) { return fsops.ConflictOverwrite, "" }
@@ -416,7 +416,9 @@ func (fs *FS) downloadOne(name, dest string, done *int64, total int64, progress 
 		switch action {
 		case fsops.ConflictSkip:
 			*done += info.Size()
-			progress(*done, total, dest)
+			if !progress(*done, total, dest) {
+				return fsops.ErrCancelled
+			}
 			return nil
 		case fsops.ConflictCancel:
 			return fsops.ErrCancelled
@@ -446,7 +448,9 @@ func (fs *FS) downloadOne(name, dest string, done *int64, total int64, progress 
 				return werr
 			}
 			*done += int64(nr)
-			progress(*done, total, dest)
+			if !progress(*done, total, dest) {
+				return fsops.ErrCancelled
+			}
 		}
 		if rerr == io.EOF {
 			break
@@ -534,7 +538,9 @@ func (fs *FS) uploadOne(src, name string, done *int64, total int64, progress fso
 		switch action {
 		case fsops.ConflictSkip:
 			*done += info.Size()
-			progress(*done, total, name)
+			if !progress(*done, total, name) {
+				return fsops.ErrCancelled
+			}
 			return nil
 		case fsops.ConflictCancel:
 			return fsops.ErrCancelled
@@ -564,7 +570,9 @@ func (fs *FS) uploadOne(src, name string, done *int64, total int64, progress fso
 				return werr
 			}
 			*done += int64(nr)
-			progress(*done, total, name)
+			if !progress(*done, total, name) {
+				return fsops.ErrCancelled
+			}
 		}
 		if rerr == io.EOF {
 			break

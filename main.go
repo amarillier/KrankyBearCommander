@@ -7,6 +7,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
 
 	fynetooltip "github.com/dweymouth/fyne-tooltip"
@@ -17,7 +18,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "1.3.0" // see FyneApp.toml
+	appVersion = "1.3.1" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -118,8 +119,26 @@ func saveMainWindowGeometry(a fyne.App, win fyne.Window) {
 
 // quitApp does teardown in the order CLAUDE.md calls out: stop background work
 // first (none yet in this bare template — add tickers/players above this call
-// as the app grows), then persist geometry, then quit.
+// as the app grows), then persist geometry, then quit. If any Copy/Move
+// operations are still running in the background (backgroundops_ui.go),
+// confirms first rather than silently killing them mid-transfer.
 func quitApp(a fyne.App, win fyne.Window) {
+	if cmdr != nil {
+		if n := len(cmdr.backgroundOps); n > 0 {
+			showDialog(dialog.NewConfirm("Quit KrankyBear Commander",
+				fmt.Sprintf("%d background operation(s) are still running. Quit anyway?", n),
+				func(ok bool) {
+					if ok {
+						doQuit(a, win)
+					}
+				}, win))
+			return
+		}
+	}
+	doQuit(a, win)
+}
+
+func doQuit(a fyne.App, win fyne.Window) {
 	if cmdr != nil {
 		cmdr.saveLayout()
 	}
@@ -134,6 +153,11 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	editorsItem := fyne.NewMenuItem("Manage Editors…", func() { cmdr.showManageEditors() })
 	connectionsItem := fyne.NewMenuItem("Connections…", func() { cmdr.showConnections(cmdr.activePane()) })
 	launcherItem := fyne.NewMenuItem("Application Launcher…", func() { cmdr.showLauncherMenu(cmdr.activePane()) })
+	backgroundOpsLabel := "Background Operations…"
+	if n := len(cmdr.backgroundOps); n > 0 {
+		backgroundOpsLabel = fmt.Sprintf("Background Operations (%d)…", n)
+	}
+	backgroundOpsItem := fyne.NewMenuItem(backgroundOpsLabel, func() { cmdr.showBackgroundOperations() })
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
 		fyne.NewMenuItem("Search… (active pane) (Ctrl+F)", func() { cmdr.showSearch(cmdr.activePane()) }),
@@ -141,6 +165,7 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { cmdr.doCopyToClipboard() }),
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { cmdr.doPaste() }),
+		backgroundOpsItem,
 		fyne.NewMenuItemSeparator(),
 		editorsItem,
 		connectionsItem,
@@ -201,8 +226,15 @@ func setupSystemTray(a fyne.App, win fyne.Window) {
 	if !ok {
 		return // not a desktop driver
 	}
+	// Unlike the main menu (rebuilt on every background-op start/stop via
+	// commander.refreshMainMenu, so its label can show a live count), the
+	// tray menu is built once at startup and never rebuilt for anything
+	// else in this app — so this item stays a plain, static label; opening
+	// it still shows live counts/rows, the label itself just doesn't.
 	menu := fyne.NewMenu(appName,
 		fyne.NewMenuItem("Show", func() { fyne.Do(func() { win.Show(); win.RequestFocus() }) }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Background Operations…", func() { fyne.Do(func() { cmdr.showBackgroundOperations() }) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Light Theme", func() { fyne.Do(func() { setLightTheme(a) }) }),
 		fyne.NewMenuItem("Dark Theme", func() { fyne.Do(func() { setDarkTheme(a) }) }),

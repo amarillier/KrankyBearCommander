@@ -5,6 +5,46 @@ Later phase someday maybe if practical - low priority now
 - maybe right click tab to duplicate, rename, duplicate or move to other pane - this adds complexity with a complete pane handling rewrite, defer
 - drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
 
+Version 1.3.1 - August 10, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Fixed a real, reproducible Move/Copy failure reading from a
+   freshly-inserted SD card or other removable drive on Windows: a
+   transient "wrong diskette"/ERROR_WRONG_DISK condition (Windows' own
+   removable-media verify check occasionally getting confused right after
+   insertion) could fail the very first file with a confusing raw OS error
+   message. Confirmed via a live Process Monitor capture that this
+   self-heals in about a second every time — Copy/Move now automatically
+   retries a few times before giving up, so it's transparent in normal
+   use; if it's ever still unresolved after retrying, the error message is
+   now a clear "the drive is still settling, try again" instead of raw
+   Windows text with unresolved placeholders.
+✨ NEW Cancel button on the Copy/Move/Extract/Compare-Sync progress dialog
+   (Escape works too) — stops promptly mid-transfer rather than only
+   between whole files, across every backend (local, SFTP, SMB,
+   FileAgent). Files already copied/moved before cancelling stay exactly
+   where they are — Move only removes a source item's original once that
+   item's own copy has fully finished, so cancelling never deletes
+   something that wasn't safely copied first.
+✨ NEW Moving multiple selected folders now shows one continuous progress
+   bar across all of them instead of resetting to 0% for each folder in
+   turn (confusing with similarly-named files across folders, e.g. trail-
+   camera photos) — and the delete-originals pass that follows each
+   folder's copy, previously silent, now shows "Cleaning up: <name>" so
+   it's clear what's happening during that pause instead of it just
+   looking stuck.
+✨ NEW Background Copy/Move — a "Background" button next to Cancel on the
+   progress dialog sends a running operation to the background instead of
+   sitting there watching it, so the rest of the app is free to use in the
+   meantime (browse, start another operation, even a second Copy/Move
+   running at the same time). A "Background Operations…" entry (File
+   menu, F9 popup, tray) lists everything still running with its own live
+   progress and Cancel; a small colored status-bar button ("N background
+   operation(s) running") appears only while something actually is,
+   clicking it opens that same list, and it disappears the moment nothing's
+   left. Closing a tab a background operation is still using is refused
+   (would otherwise sever a live SFTP/SMB/FileAgent connection out from
+   under it), and quitting with anything still running asks first.
+
 Version 1.3.0 - August 08, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✨ NEW Compare/Synchronize Directories (File menu / F9 popup, or the new

@@ -32,8 +32,16 @@ const (
 // ProgressFunc reports cumulative bytes copied/moved so far against the
 // best-effort total, and the path currently being processed. A whole-item
 // rename-based move (same filesystem, no byte copy) reports done=total=0 for
-// that item since there is nothing to measure incrementally.
-type ProgressFunc func(done, total int64, currentPath string)
+// that item since there is nothing to measure incrementally. currentPath is
+// sometimes a plain descriptive phase label (e.g. "Cleaning up: <name>")
+// rather than a real path — callers displaying it should not assume it's a
+// filesystem path.
+//
+// The return value reports whether the operation should continue — false
+// means the caller has requested cancellation, and every consumer of a
+// ProgressFunc must stop promptly (returning ErrCancelled) rather than
+// pushing through to completion.
+type ProgressFunc func(done, total int64, currentPath string) bool
 
 // ConflictFunc is invoked with the destination path that already exists.
 // newName is only consulted when action == ConflictRename, and must be a
@@ -44,8 +52,37 @@ type ConflictFunc func(destPath string) (action ConflictAction, newName string)
 // ErrCancelled is returned when a ConflictFunc returns ConflictCancel.
 var ErrCancelled = errors.New("operation cancelled")
 
-func noProgress(int64, int64, string)            {}
+func noProgress(int64, int64, string) bool       { return true }
 func noConflict(string) (ConflictAction, string) { return ConflictOverwrite, "" }
+
+// retryAttempts/retryDelay: a Process Monitor capture of the real
+// "wrong diskette"/ERROR_WRONG_DISK failure (see IsTransientRemovableMediaError)
+// showed Windows' own internal volume-verify recovery — visible as it
+// re-reading the raw volume's boot sector/FAT tables — completing in
+// 0.5-1.2s every time observed, after which the exact same access that just
+// failed succeeds normally. 3 attempts at 700ms apart comfortably covers
+// that with margin.
+const (
+	retryAttempts = 3
+	retryDelay    = 700 * time.Millisecond
+)
+
+// retryTransient calls fn, retrying it (up to retryAttempts total) if it
+// fails with a transient removable-media error, sleeping retryDelay between
+// attempts. Any other error, or the last attempt's error, is returned as-is.
+func retryTransient(fn func() error) error {
+	var err error
+	for attempt := 1; attempt <= retryAttempts; attempt++ {
+		err = fn()
+		if err == nil || !IsTransientRemovableMediaError(err) {
+			return err
+		}
+		if attempt < retryAttempts {
+			time.Sleep(retryDelay)
+		}
+	}
+	return err
+}
 
 // Copy recursively copies each of sources into destDir, preserving each
 // source's base name. Conflicts are resolved per file (directories are
@@ -76,7 +113,10 @@ func Copy(sources []string, destDir string, progress ProgressFunc, resolve Confl
 // Move relocates each of sources into destDir. It tries an atomic rename
 // first (fast path, same filesystem); on any failure (typically a cross-
 // device rename) it falls back to copying then removing the source.
-// Conflict resolution happens once per top-level source item.
+// Conflict resolution happens once per top-level source item. The items
+// needing the copy+delete fallback share one combined total/done across
+// all of them (rather than resetting per item), so a multi-item Move shows
+// one continuous progress bar instead of restarting at 0% for each item.
 func Move(sources []string, destDir string, progress ProgressFunc, resolve ConflictFunc) error {
 	if progress == nil {
 		progress = noProgress
@@ -84,6 +124,9 @@ func Move(sources []string, destDir string, progress ProgressFunc, resolve Confl
 	if resolve == nil {
 		resolve = noConflict
 	}
+
+	type pendingItem struct{ src, dest string }
+	var pending []pendingItem
 
 	for _, src := range sources {
 		dest := filepath.Join(destDir, filepath.Base(src))
@@ -105,23 +148,69 @@ func Move(sources []string, destDir string, progress ProgressFunc, resolve Confl
 		}
 
 		if err := os.Rename(src, dest); err == nil {
-			progress(0, 0, src)
+			if !progress(0, 0, src) {
+				return ErrCancelled
+			}
 			continue
 		}
 
-		total, err := totalSize([]string{src})
-		if err != nil {
+		pending = append(pending, pendingItem{src, dest})
+	}
+
+	if len(pending) == 0 {
+		return nil
+	}
+
+	srcs := make([]string, len(pending))
+	for i, p := range pending {
+		srcs[i] = p.src
+	}
+	total, err := totalSize(srcs)
+	if err != nil {
+		return err
+	}
+
+	var done int64
+	for _, p := range pending {
+		if err := copyPath(p.src, p.dest, &done, total, progress, noConflict); err != nil {
 			return err
 		}
-		var done int64
-		if err := copyPath(src, dest, &done, total, progress, noConflict); err != nil {
-			return err
+		if !progress(done, total, "Cleaning up: "+filepath.Base(p.src)) {
+			return ErrCancelled
 		}
-		if err := os.RemoveAll(src); err != nil {
+		if err := removeAllWithProgress(p.src, &done, total, progress); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// removeAllWithProgress removes path (file or directory tree), reporting
+// each entry via progress before removing it — Move's "Cleaning up" phase
+// (see Move) is otherwise silent, unlike os.RemoveAll which it replaces.
+func removeAllWithProgress(path string, done *int64, total int64, progress ProgressFunc) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if !progress(*done, total, "Cleaning up: "+e.Name()) {
+				return ErrCancelled
+			}
+			if err := removeAllWithProgress(filepath.Join(path, e.Name()), done, total, progress); err != nil {
+				return err
+			}
+		}
+	}
+	return os.Remove(path)
 }
 
 // Delete removes each path. permanent=false sends to the OS trash (see
@@ -530,22 +619,27 @@ func DirSize(path string) (int64, error) {
 func totalSize(paths []string) (int64, error) {
 	var total int64
 	for _, p := range paths {
-		err := filepath.WalkDir(p, func(_ string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if !d.IsDir() {
-				info, err := d.Info()
+		var pathTotal int64
+		err := retryTransient(func() error {
+			pathTotal = 0
+			return filepath.WalkDir(p, func(_ string, d fs.DirEntry, err error) error {
 				if err != nil {
 					return err
 				}
-				total += info.Size()
-			}
-			return nil
+				if !d.IsDir() {
+					info, err := d.Info()
+					if err != nil {
+						return err
+					}
+					pathTotal += info.Size()
+				}
+				return nil
+			})
 		})
 		if err != nil {
 			return 0, err
 		}
+		total += pathTotal
 	}
 	return total, nil
 }
@@ -565,7 +659,15 @@ func copyDir(src, dest string, done *int64, total int64, progress ProgressFunc, 
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(src)
+	var entries []os.DirEntry
+	err := retryTransient(func() error {
+		e, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		entries = e
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -583,7 +685,9 @@ func copyFile(src, dest string, info os.FileInfo, done *int64, total int64, prog
 		switch action {
 		case ConflictSkip:
 			*done += info.Size()
-			progress(*done, total, src)
+			if !progress(*done, total, src) {
+				return ErrCancelled
+			}
 			return nil
 		case ConflictCancel:
 			return ErrCancelled
@@ -594,27 +698,54 @@ func copyFile(src, dest string, info os.FileInfo, done *int64, total int64, prog
 		}
 	}
 
-	in, err := os.Open(src)
-	if err != nil {
-		return err
+	buf := make([]byte, 256*1024)
+	var in, out *os.File
+	var n int
+	var rerr error
+
+	// The open + very first read is exactly where a removable drive's
+	// transient "wrong volume" condition (IsTransientRemovableMediaError)
+	// surfaces, confirmed via a real Process Monitor capture — retry just
+	// this step; the rest of the file streams through unprotected below,
+	// since every observed failure happened on read #1, never mid-file.
+	openErr := retryTransient(func() error {
+		if in != nil {
+			in.Close()
+		}
+		if out != nil {
+			out.Close()
+		}
+		var err error
+		in, err = os.Open(src)
+		if err != nil {
+			return err
+		}
+		out, err = os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+		if err != nil {
+			in.Close()
+			return err
+		}
+		n, rerr = in.Read(buf)
+		if rerr != nil && rerr != io.EOF {
+			return rerr
+		}
+		return nil
+	})
+	if openErr != nil {
+		return openErr
 	}
 	defer in.Close()
-
-	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
 	defer out.Close()
 
-	buf := make([]byte, 256*1024)
 	for {
-		n, rerr := in.Read(buf)
 		if n > 0 {
 			if _, werr := out.Write(buf[:n]); werr != nil {
 				return werr
 			}
 			*done += int64(n)
-			progress(*done, total, src)
+			if !progress(*done, total, src) {
+				return ErrCancelled
+			}
 		}
 		if rerr == io.EOF {
 			break
@@ -622,6 +753,7 @@ func copyFile(src, dest string, info os.FileInfo, done *int64, total int64, prog
 		if rerr != nil {
 			return rerr
 		}
+		n, rerr = in.Read(buf)
 	}
 	return out.Close()
 }

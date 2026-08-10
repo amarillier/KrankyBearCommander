@@ -45,6 +45,7 @@ type pane struct {
 	onRefreshAll         func()                                                            // this pane's own ⟳ drive-bar button clicked; commander refreshes both panes (see commander.doRefresh) rather than just this one
 	onChromeChanged      func()                                                            // active tab's title/path may have changed; commander keeps the command bar's cwd label in sync (cmdline_ui.go)
 	onReconnect          func(connID string) (vfs.FileSystem, error)                       // retry banner's Retry button on a connection tab; commander re-establishes it fresh (connections_ui.go's reconnectConnection)
+	isPinned             func(v *fileListView) bool                                        // a background operation (backgroundops_ui.go) still targets this view; refuse to close its tab if so
 
 	tabs   *container.DocTabs
 	views  []*fileListView
@@ -68,8 +69,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onLauncher func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func(), onChromeChanged func(), onReconnect func(connID string) (vfs.FileSystem, error), onCompareSync func()) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onLauncher: onLauncher, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll, onChromeChanged: onChromeChanged, onReconnect: onReconnect, onCompareSync: onCompareSync}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onLauncher func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func(), onChromeChanged func(), onReconnect func(connID string) (vfs.FileSystem, error), onCompareSync func(), isPinned func(v *fileListView) bool) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onLauncher: onLauncher, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll, onChromeChanged: onChromeChanged, onReconnect: onReconnect, onCompareSync: onCompareSync, isPinned: isPinned}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -178,6 +179,10 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 		}
 		idx := p.indexOf(item)
 		if idx < 0 {
+			return
+		}
+		if p.isPinned != nil && p.isPinned(p.views[idx]) {
+			p.onStatus("can't close — a background operation is still using this tab")
 			return
 		}
 		p.views[idx].closeFS() // release an open archive handle, if this tab was browsing one

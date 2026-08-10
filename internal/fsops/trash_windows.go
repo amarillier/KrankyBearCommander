@@ -34,6 +34,16 @@ var (
 	procSHFileOperationW = modShell32.NewProc("SHFileOperationW")
 )
 
+// errFileNotFound is ERROR_FILE_NOT_FOUND — SHFileOperationW falls through
+// to plain Win32 error codes (rather than one of its own DE_* pseudo-codes)
+// when the underlying file API it calls fails, and this is by far the most
+// common case in practice: the selection went stale (something else already
+// removed the file — a real repro was a background Move's own cleanup pass
+// racing a F8 Delete on the same, now-already-gone item). The desired end
+// state — this path being gone — already holds, so treat it as success
+// rather than an error a user has to click through.
+const errFileNotFound = 2
+
 // trashPlatform sends path to the Windows Recycle Bin via SHFileOperationW.
 func trashPlatform(path string) error {
 	abs, err := filepath.Abs(path)
@@ -55,8 +65,11 @@ func trashPlatform(path string) error {
 		fFlags: fofAllowUndo | fofNoConfirmation | fofSilent,
 	}
 	ret, _, _ := procSHFileOperationW.Call(uintptr(unsafe.Pointer(&op)))
+	if ret == errFileNotFound {
+		return nil
+	}
 	if ret != 0 {
-		return fmt.Errorf("fsops: SHFileOperationW failed with code %d", ret)
+		return fmt.Errorf("couldn't send %q to the Recycle Bin (Windows error code %d)", filepath.Base(abs), ret)
 	}
 	return nil
 }

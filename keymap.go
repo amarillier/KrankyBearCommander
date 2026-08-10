@@ -17,6 +17,8 @@
 package main
 
 import (
+	"fmt"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
@@ -238,6 +240,11 @@ func (c *commander) doOpenMenu() {
 	briefColumnsItem := fyne.NewMenuItem("Brief Columns", nil)
 	briefColumnsItem.ChildMenu = c.buildBriefColumnsSubmenu(nil)
 
+	backgroundOpsLabel := "Background Operations…"
+	if n := len(c.backgroundOps); n > 0 {
+		backgroundOpsLabel = fmt.Sprintf("Background Operations (%d)…", n)
+	}
+
 	menu := fyne.NewMenu("",
 		fyne.NewMenuItem("New Tab (active pane)", func() {
 			p := c.activePane()
@@ -254,6 +261,7 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Compare/Synchronize Directories…", func() { c.showCompareSync(comparePrimaryNone) }),
 		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { c.doCopyToClipboard() }),
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { c.doPaste() }),
+		fyne.NewMenuItem(backgroundOpsLabel, func() { c.showBackgroundOperations() }),
 		fyne.NewMenuItem("Multi-Rename Tool… (Ctrl+M)", func() { c.showMultiRenameTool() }),
 		fyne.NewMenuItem("Change Attributes…", func() { c.showChangeAttributes() }),
 		hiddenFilesItem,
