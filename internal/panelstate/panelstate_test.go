@@ -116,6 +116,95 @@ func TestNavigateClearsSelectionAndCursor(t *testing.T) {
 	}
 }
 
+func TestNavigateAndJumpClearFilter(t *testing.T) {
+	s := New("/home/user")
+	s.Filter = "foo"
+	s.Navigate("/home/user/docs")
+	if s.Filter != "" {
+		t.Fatalf("Navigate should clear Filter, got %q", s.Filter)
+	}
+
+	s.Filter = "bar"
+	s.Jump("/home/user/pics")
+	if s.Filter != "" {
+		t.Fatalf("Jump should clear Filter, got %q", s.Filter)
+	}
+}
+
+func TestRecordHistoryThenGoBackAndForward(t *testing.T) {
+	// RecordHistory is always called AFTER Path has already moved (see
+	// navigateTo/JumpTo in filelist.go) — prev is the value Path held
+	// just before.
+	s := New("/a")
+	s.Path = "/b" // navigated /a -> /b
+	s.RecordHistory("/a")
+	s.Path = "/c" // navigated /b -> /c
+	s.RecordHistory("/b")
+
+	if !s.CanGoBack() || s.CanGoForward() {
+		t.Fatalf("after two navigations, want CanGoBack=true CanGoForward=false, got back=%v forward=%v", s.CanGoBack(), s.CanGoForward())
+	}
+
+	target, ok := s.GoBack()
+	if !ok || target != "/b" {
+		t.Fatalf("GoBack() = (%q, %v), want (/b, true)", target, ok)
+	}
+	s.Path = target
+	if !s.CanGoForward() {
+		t.Fatal("GoBack should push the departed path onto forward")
+	}
+
+	target, ok = s.GoBack()
+	if !ok || target != "/a" {
+		t.Fatalf("second GoBack() = (%q, %v), want (/a, true)", target, ok)
+	}
+	s.Path = target
+	if s.CanGoBack() {
+		t.Fatal("no more back entries after popping both")
+	}
+
+	target, ok = s.GoForward()
+	if !ok || target != "/b" {
+		t.Fatalf("GoForward() = (%q, %v), want (/b, true)", target, ok)
+	}
+}
+
+func TestRecordHistoryClearsForwardOnNewNavigation(t *testing.T) {
+	s := New("/a")
+	s.Path = "/b" // navigated /a -> /b
+	s.RecordHistory("/a")
+
+	target, ok := s.GoBack()
+	if !ok || target != "/a" {
+		t.Fatalf("GoBack() = (%q, %v), want (/a, true)", target, ok)
+	}
+	s.Path = target
+	if !s.CanGoForward() {
+		t.Fatal("expected a forward entry after GoBack")
+	}
+
+	// A fresh navigation from here should invalidate forward, like a
+	// browser: you can't "redo" into a branch you just left via a new path.
+	prev := s.Path
+	s.Path = "/newplace"
+	s.RecordHistory(prev)
+	if s.CanGoForward() {
+		t.Fatal("a new navigation should clear the forward stack")
+	}
+}
+
+func TestRecordHistoryNoopWhenPathUnchanged(t *testing.T) {
+	s := New("/a")
+	s.RecordHistory("/a") // prev == current Path — nothing actually moved
+	if s.CanGoBack() {
+		t.Fatal("RecordHistory should no-op when prev equals the current Path")
+	}
+	s.RecordHistory("")
+	if s.CanGoBack() {
+		t.Fatal("RecordHistory should no-op on an empty prev")
+	}
+}
+
 func TestToggleSelect(t *testing.T) {
 	s := New("/home/user")
 	s.ToggleSelect("a.txt")

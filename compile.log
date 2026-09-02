@@ -1,0 +1,321 @@
+KrankyBear Commander - Linux, Mac, Windows Sync, Compile. Package and Sync Back (bash)
+================================================
+
+MacOS
+KrankyBear Commander - macOS Compile Script
+================================================
+
+Note: Build only macOS binaries here.
+      Outputs: bin/krankybear-commander-macos-{amd64,arm64} and ./commander (native arch, for ./buildrun.sh).
+
+Building for macOS (Intel)...
+# commander
+ld: warning: ignoring duplicate libraries: '-lobjc'
+✓ macOS (Intel) build successful
+
+Building for macOS (Apple Silicon)...
+# commander
+ld: warning: ignoring duplicate libraries: '-lobjc'
+✓ macOS (Apple Silicon) build successful
+Setting icons
+/private/tmp/KrankyBearCommander.png
+  /private/tmp/KrankyBearCommander.png
+/private/tmp/KrankyBearCommander.png
+  /private/tmp/KrankyBearCommander.png
+/private/tmp/KrankyBearCommander.png
+  /private/tmp/KrankyBearCommander.png
+
+================================================
+Compile complete! Binaries are in the bin/ directory.
+total 175456
+-rwxr-xr-x@ 1 ivan.marillier  staff    29M Sep  2 11:58 krankybear-commander-macos-amd64
+-rwxr-xr-x@ 1 ivan.marillier  staff    27M Sep  2 11:58 krankybear-commander-macos-arm64
+drwxr-xr-x  6 ivan.marillier  staff   192B Jul 27 10:29 mesa-fallback
+-rw-r-----@ 1 ivan.marillier  staff    26M Aug 10 07:58 mesa-fallback.zip
+Building .app bundle: KrankyBearCommander.app...
+App bundle created successfully.
+Building macOS .pkg (arm64) -> ./installers/krankybear-commander_1.4.0-1_arm64.pkg...
+Building package with fpm...
+{:timestamp=>"2026-09-02T11:58:29.195282-0500", :message=>"Created package", :path=>"./installers/krankybear-commander_1.4.0-1_arm64.pkg"}
+✓ fpm packaging succeeded
+/private/tmp/KrankyBearCommander.png
+  /private/tmp/KrankyBearCommander.png
+
+Done. Package created:
+  ./installers/krankybear-commander_1.4.0-1_arm64.pkg
+
+To install:
+  sudo installer -pkg ./installers/krankybear-commander_1.4.0-1_arm64.pkg -target /
+  or double-click the .pkg file
+
+To verify installation:
+  ls -la /Applications/KrankyBearCommander.app
+  pkgutil --pkg-info krankybear-commander
+Cleaning up temporary .app bundle...
+Building .app bundle: KrankyBearCommander.app...
+App bundle created successfully.
+Building macOS .pkg (amd64) -> ./installers/krankybear-commander_1.4.0-1_amd64.pkg...
+Building package with fpm...
+{:timestamp=>"2026-09-02T11:58:31.592295-0500", :message=>"Created package", :path=>"./installers/krankybear-commander_1.4.0-1_amd64.pkg"}
+✓ fpm packaging succeeded
+/private/tmp/KrankyBearCommander.png
+  /private/tmp/KrankyBearCommander.png
+
+Done. Package created:
+  ./installers/krankybear-commander_1.4.0-1_amd64.pkg
+
+To install:
+  sudo installer -pkg ./installers/krankybear-commander_1.4.0-1_amd64.pkg -target /
+  or double-click the .pkg file
+
+To verify installation:
+  ls -la /Applications/KrankyBearCommander.app
+  pkgutil --pkg-info krankybear-commander
+Cleaning up temporary .app bundle...
+Linux
+=== Syncing to Ubuntu 18.04 ===
+Target: allan@192.168.1.18:/home/allan/KrankyBearCommander
+sending incremental file list
+./
+commander
+compile.log
+assets/License.txt
+assets/ReleaseNotes.txt
+internal/fsops/
+internal/fsops/trash_unix.go
+
+sent 34,712 bytes  received 33,135 bytes  45,231.33 bytes/sec
+total size is 205,181,962  speedup is 3,024.19
+
+=== Compiling on Ubuntu 18.04 ===
+KrankyBear Commander - Linux Compile Script
+=========================================
+
+
+Checking for required dependencies...
+Installing missing dependencies...
+  Runtime packages: libasound2 libgl1-mesa-glx libx11-6
+  Development packages: libasound2-dev libgl1-mesa-dev libx11-dev
+Hit:1 http://us.archive.ubuntu.com/ubuntu focal InRelease
+Hit:2 http://us.archive.ubuntu.com/ubuntu focal-updates InRelease
+Hit:3 http://us.archive.ubuntu.com/ubuntu focal-backports InRelease
+Hit:4 http://us.archive.ubuntu.com/ubuntu focal-security InRelease
+Hit:5 http://ports.ubuntu.com/ubuntu-ports focal InRelease
+Hit:6 http://ports.ubuntu.com/ubuntu-ports focal-updates InRelease
+Hit:7 http://ports.ubuntu.com/ubuntu-ports focal-security InRelease
+Hit:8 http://ports.ubuntu.com/ubuntu-ports focal-backports InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+libasound2 is already the newest version (1.2.2-2.1ubuntu2.5).
+libasound2-dev is already the newest version (1.2.2-2.1ubuntu2.5).
+libgl1-mesa-dev is already the newest version (21.2.6-0ubuntu0.1~20.04.2).
+libgl1-mesa-glx is already the newest version (21.2.6-0ubuntu0.1~20.04.2).
+libx11-6 is already the newest version (2:1.6.9-2ubuntu1.6).
+libx11-dev is already the newest version (2:1.6.9-2ubuntu1.6).
+0 upgraded, 0 newly installed, 0 to remove and 2 not upgraded.
+
+Building for Linux AMD64...
+✓ Linux AMD64 build successful
+
+Building for Linux ARM64...
+✓ Linux ARM64 build successful
+
+Done. Binaries:
+-rwxrwxr-x 1 allan allan 29M Sep  2 11:59 bin/krankybear-commander-linux-amd64
+-rwxrwxr-x 1 allan allan 27M Sep  2 11:59 bin/krankybear-commander-linux-arm64
+
+Verifying runtime dependencies (ldd)...
+AMD64 binary:
+	libX11.so.6 => /usr/lib/x86_64-linux-gnu/libX11.so.6 (0x00007f5b83222000)
+	libGL.so.1 => /usr/lib/x86_64-linux-gnu/libGL.so.1 (0x00007f5b8315b000)
+	libGLdispatch.so.0 => /usr/lib/x86_64-linux-gnu/libGLdispatch.so.0 (0x00007f5b82d30000)
+	libGLX.so.0 => /usr/lib/x86_64-linux-gnu/libGLX.so.0 (0x00007f5b82cfc000)
+
+Runtime requirements (not bundled):
+- ALSA library (libasound2) for sound playback
+- OpenGL/X11 libs for Fyne (typically present on desktop distros)
+
+If dependencies are missing, they will be automatically installed.
+Manual install commands (for reference):
+  Ubuntu/Debian: sudo apt-get install -y libasound2 libgl1-mesa-glx libx11-6
+  Ubuntu/Debian: sudo apt-get install -y build-essential pkg-config libasound2-dev libgl1-mesa-dev libx11-dev
+  Ubuntu/Debian: sudo apt-get install -y gcc-aarch64-linux-gnu (for ARM64 cross-compilation)
+  Fedora/RHEL:   sudo dnf install -y alsa-lib mesa-libGL libX11
+  Fedora/RHEL:   sudo dnf install -y gcc pkg-config alsa-lib-devel mesa-libGL-devel libX11-devel
+  Fedora/RHEL:   sudo dnf install -y gcc-aarch64-linux-gnu (for ARM64 cross-compilation)
+
+To retrieve binaries from this remote system, run on your local machine:
+  scp allan@ubuntubuildlab2.marillier.local:/home/allan/KrankyBearCommander/bin/krankybear-commander-linux-* ./bin/
+
+Or set environment variables to auto-send:
+  export SCP_DEST_USER=your_local_username
+  export SCP_DEST_HOST=your_local_hostname_or_ip
+  export SCP_DEST_PATH=~/path/to/bin/  # optional, defaults to ~/KrankyBearCommander/bin/
+
+=== Retrieving compiled binary ===
+-rwxr-xr-x  1 ivan.marillier  staff    28M Sep  2 11:59 ./bin/krankybear-commander-linux-amd64
+-rwxr-xr-x  1 ivan.marillier  staff    26M Sep  2 11:59 ./bin/krankybear-commander-linux-arm64
+
+=== Packaging on Ubuntu 18.04 ===
+Creating staging directory for Linux payload...
+  Mode: Bundled resources
+Building .deb (amd64) -> ./installers/krankybear-commander_1.4.0-1_amd64.deb...
+{:timestamp=>"2026-09-02T11:59:55.544145-0500", :message=>"Created package", :path=>"./installers/krankybear-commander_1.4.0-1_amd64.deb"}
+
+Building .rpm (x86_64) -> ./installers/krankybear-commander_1.4.0-1_x86_64.rpm...
+{:timestamp=>"2026-09-02T12:00:05.739230-0500", :message=>"Created package", :path=>"./installers/krankybear-commander_1.4.0-1_x86_64.rpm"}
+
+Done. Packages created:
+  ./installers/krankybear-commander_1.4.0-1_amd64.deb
+  ./installers/krankybear-commander_1.4.0-1_x86_64.rpm
+
+Install with:
+  apt install ././installers/krankybear-commander_1.4.0-1_amd64.deb
+  # or
+  dpkg -i ././installers/krankybear-commander_1.4.0-1_amd64.deb
+
+Application installed to: /opt/KrankyBearCommander/ (locale packs under assets/i18n/ when packaged)
+Creating staging directory for Linux payload...
+  Mode: Bundled resources
+Building .deb (arm64) -> ./installers/krankybear-commander_1.4.0-1_arm64.deb...
+{:timestamp=>"2026-09-02T12:00:15.876013-0500", :message=>"Created package", :path=>"./installers/krankybear-commander_1.4.0-1_arm64.deb"}
+
+Building .rpm (aarch64) -> ./installers/krankybear-commander_1.4.0-1_aarch64.rpm...
+{:timestamp=>"2026-09-02T12:00:24.024266-0500", :message=>"Created package", :path=>"./installers/krankybear-commander_1.4.0-1_aarch64.rpm"}
+
+Done. Packages created:
+  ./installers/krankybear-commander_1.4.0-1_arm64.deb
+  ./installers/krankybear-commander_1.4.0-1_aarch64.rpm
+
+Install with:
+  apt install ././installers/krankybear-commander_1.4.0-1_arm64.deb
+  # or
+  dpkg -i ././installers/krankybear-commander_1.4.0-1_arm64.deb
+
+Application installed to: /opt/KrankyBearCommander/ (locale packs under assets/i18n/ when packaged)
+=== Retrieving installers ===
+//allanm@allanm.marillier.local/AllanMWin on /Users/ivan.marillier/AllanMWin (smbfs, nodev, nosuid, mounted by ivan.marillier)
+Windows
+syncing to windows
+//allanm@allanm.marillier.local/AllanMWin on /Users/ivan.marillier/AllanMWin (smbfs, nodev, nosuid, mounted by ivan.marillier)
+[0;34m=== Syncing to Windows ===[0m
+Copying files to Windows share (excluding build outputs and vendor directory)...
+Note: vendor/ directory excluded - Go will download dependencies on Windows
+sending incremental file list
+./
+commander
+commander.go
+comparesync_ui.go
+compile-windows.ps1
+compile.log
+duplicatefinder_ui.go
+fileops_ui.go
+go.mod
+keymap.go
+main.go
+prepare-deps.ps1
+rsrc_windows_amd64.syso
+.claude/
+.claude/worktrees/
+assets/License.txt
+assets/ReleaseNotes.txt
+assets/i18n/
+assets/images/allanm/
+assets/images/eggs/
+assets/images/holidaybeareastereggs/
+assets/images/holidaybeareastereggs/256x256/
+assets/mesa-win/
+bin/
+installers/
+internal/
+internal/apppaths/
+internal/connections/
+internal/dragout/
+internal/driveops/
+internal/editors/
+internal/favorites/
+internal/fsops/
+internal/fsops/duplicates.go
+internal/fsops/duplicates_test.go
+internal/fsops/fsops.go
+internal/fsops/hash.go
+internal/fsops/hash_test.go
+internal/fsops/trash_unix.go
+internal/i18n/
+internal/i18n/embedded_defaults/
+internal/i18n/fyne_bundles/
+internal/launch/
+internal/launchers/
+internal/layout/
+internal/osclipboard/
+internal/panelstate/
+internal/rename/
+internal/startup/
+internal/vfs/
+internal/vfs/fileagentfs/
+internal/vfs/listboxfs/
+internal/vfs/localfs/
+internal/vfs/sftpfs/
+internal/vfs/smbfs/
+internal/vfs/zipfs/
+internal/wakewatch/
+test/
+
+sent 29,113,432 bytes  received 1,365 bytes  103,061.23 bytes/sec
+total size is 205,230,279  speedup is 7.05
+[0;32m✓ Files synced to: /Users/ivan.marillier/AllanMWin/Allan/Source/go/KrankyBearCommander[0m
+
+[0;34m=== Next: Compile on Windows ===[0m
+To compile the Windows binary, open PowerShell on Windows and run:
+
+  cd C:\Allan\Source\go\KrankyBearCommander
+  go build -ldflags="-s -w -H windowsgui" -trimpath -o bin\KrankyBearCommander.exe
+
+Or use the compile script:
+  .\compile-windows.ps1
+
+After compiling, run this script again to sync back the binary.
+  Or use: ./sync2windows.sh sync-back  (faster - only syncs binaries)
+
+[0;32m=== Sync Complete ===[0m
+
+Files are at: /Users/ivan.marillier/AllanMWin/Allan/Source/go/KrankyBearCommander
+
+[0;34m=== Syncing changes back from Windows ===[0m
+sending incremental file list
+
+sent 122 bytes  received 14 bytes  54.40 bytes/sec
+total size is 0  speedup is 0.00
+[0;32m✓ Files synced back from Windows[0m
+
+Note: Windows binary not found (needs to be compiled on Windows)
+
+Next steps on Windows:
+1. Open PowerShell
+2. cd to C:\Allan\Source\go\KrankyBearCommander
+3. Run: .\compile-windows.ps1 -Package
+  OR: Run: go build -ldflags="-s -w -H windowsgui" -trimpath -o bin\KrankyBearCommander.exe
+
+Then run: ./sync2windows.sh sync-back  (to copy the binary back)
+compiling on windows with packaging
+Connecting to Windows host: allanm@192.168.1.9
+Using batch wrapper: C:\Allan\Source\go\KrankyBearCommander\compile-windows.bat
+Parameters:  -package
+
+KrankyBear Commander - Windows compile (GUI, native Windows host)
+=============================================================
+Working directory: C:\Allan\Source\go\KrankyBearCommander
+
+Diagnostics: go version go1.26.1 windows/amd64
+Diagnostics: go env GOMOD GOWORK GOFLAGS GOOS GOARCH CGO_ENABLED
+C:\Allan\Source\go\KrankyBearCommander\go.mod
+off
+-buildvcs=false
+windows
+amd64
+1
+
+Caching OpenGL modules (go-gl)...
+Building Windows GUI binary (bin\KrankyBearCommander.exe)...

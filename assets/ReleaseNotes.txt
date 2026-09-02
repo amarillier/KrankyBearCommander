@@ -1,9 +1,59 @@
 Future ideas:
 
 Later phase someday maybe if practical - low priority now
-- possibly allow dragging tabs within a pane to reorder - this adds complexity with a complete pane handling rewrtite, defer
-- maybe right click tab to duplicate, rename, duplicate or move to other pane - this adds complexity with a complete pane handling rewrite, defer
+- possibly allow dragging tabs within a pane to reorder - this adds complexity with a complete pane handling rewrite
+- maybe right click tab to duplicate, rename, duplicate or move to other pane - this adds complexity with a complete pane handling rewrite
 - drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+
+Version 1.4.0 - September 02, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Per-pane directory back/forward history (Alt+Left/Alt+Right, View
+   menu/F9 popup → Go Back/Go Forward, or the new ◀/▶ buttons on the
+   volume/drive toolbar between \ and ..) — browser-style history for
+   each tab's own navigation, independent of every other tab. Any real
+   navigation (Home, .., a drive button, opening a directory, a Favorite,
+   Search's "go to result", ...) records a step and clears whatever was
+   ahead, exactly like a browser's own Back/Forward; Back/Forward
+   themselves don't re-record. Session-only, like selection/cursor — not
+   persisted across launches.
+✨ NEW Quick incremental filter (Ctrl+S, TotalCmd's own convention; View
+   menu/F9 popup → Quick Filter…, or the new eye button on the volume/
+   drive toolbar) — a small bar above the listing that narrows the
+   current tab's rows live as you type, entirely client-side against the
+   last full read (no disk re-read, unlike Search). Escape, the bar's own
+   close button, or Ctrl+S again hides it and clears the query; so does
+   navigating away, the same way selection/cursor already reset per
+   directory. Complements Search rather than replacing it — Search still
+   recurses into subfolders and jumps you to a match.
+✨ NEW Hover the system-tray icon to see the app name — a plain tooltip,
+   same as every toolbar button already has, just useful when several
+   tray icons look alike.
+✨ NEW Verify After Copy (Checksum) — an optional toggle (File menu/F9
+   popup, a checked menu item) that re-reads and hashes every file after
+   a local Copy or Move to confirm it landed byte-for-byte identical to
+   the source, catching silent corruption a plain OS copy wouldn't —
+   not just the transient "wrong diskette" case 1.3.1's retry logic
+   already handles. Off by default, remembered once toggled on; covers
+   local-to-local Copy/Move only — Download/Upload/cross-connection
+   transfers are unaffected.
+✨ NEW Find Duplicate Files (File menu/F9 popup, the new pane toolbar
+   button, or Ctrl+D) — recursively scans the active tab's current
+   directory for files with byte-identical content (not just matching
+   name/size), then lets you review every duplicate group with a
+   per-file Keep/Delete choice before confirming; deleted files go to
+   the trash, not permanently. Recursion depth defaults to unlimited but
+   can be capped via a prompt before the scan starts, for a huge tree
+   where the overhead is worth bounding. "Feed to Listbox" flattens
+   every result into a temporary listbox view, same as Search's own
+   version of that. Local directories only, same scope as Verify After
+   Copy above.
+🐛 FIX Backgrounded a best-effort mitigation for the known intermittent
+   Fyne/GLFW idle/wake freeze (macOS only; see the "Intermittent freeze"
+   entry the community keeps hitting): right after this Mac wakes from
+   sleep, the main window now gets a trivial resize-and-back plus a
+   focus request, mirroring the manual workaround some Fyne users report
+   actually "waking up" a stalled window. Not a real fix for the
+   upstream bug, just a nudge; a no-op on Windows/Linux.
 
 Version 1.3.1 - August 10, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

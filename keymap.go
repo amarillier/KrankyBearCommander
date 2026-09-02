@@ -126,6 +126,11 @@ func (c *commander) registerShortcuts() {
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyF, Modifier: desktop.ControlModifier},
 		func(fyne.Shortcut) { c.showSearch(c.activePane()) })
 
+	// Find Duplicate Files — literal Ctrl, same reasoning as Ctrl+U/Ctrl+M/
+	// Ctrl+R/Ctrl+F above; unused elsewhere in this app.
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyD, Modifier: desktop.ControlModifier},
+		func(fyne.Shortcut) { c.doFindDuplicates() })
+
 	// Switch Active Pane: plain Tab isn't usable for this — Fyne's glfw
 	// driver intercepts it before it ever reaches a shortcut, TypedKey, or
 	// dispatchKey at all, unconditionally calling its own FocusNext()/
@@ -144,6 +149,22 @@ func (c *commander) registerShortcuts() {
 	toggleActivePane := func(fyne.Shortcut) { c.toggleActivePane() }
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyTab, Modifier: desktop.ControlModifier}, toggleActivePane)
 	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyO, Modifier: desktop.ControlModifier}, toggleActivePane)
+
+	// Back/Forward navigation history: Alt+Left/Alt+Right, the browser
+	// convention — a real, non-Shift modifier, so it doesn't hit the
+	// triggersShortcut bug described above. Free everywhere else in this
+	// app (no existing Alt-modifier binding).
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyLeft, Modifier: desktop.AltModifier},
+		func(fyne.Shortcut) { c.goBackActive() })
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyRight, Modifier: desktop.AltModifier},
+		func(fyne.Shortcut) { c.goForwardActive() })
+
+	// Incremental quick-filter (TotalCmd's Ctrl+S convention) — literal
+	// Ctrl, same reasoning as Ctrl+U/Ctrl+M/Ctrl+R/Ctrl+F above; unused
+	// elsewhere in this app (the built-in editor has no Save shortcut at
+	// all, only on-screen buttons).
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: desktop.ControlModifier},
+		func(fyne.Shortcut) { c.toggleFilterActive() })
 
 	// Focus the command line (cmdline_ui.go): Ctrl+L, matching the browser
 	// convention for "focus the location/command bar" (Firefox/Chrome both
@@ -237,6 +258,9 @@ func (c *commander) doOpenMenu() {
 	cmdLineItem := fyne.NewMenuItem("Show Command Line", func() { c.toggleShowCmdLine() })
 	cmdLineItem.Checked = c.showCmdLine
 
+	verifyItem := fyne.NewMenuItem("Verify After Copy (Checksum)", func() { c.toggleVerifyAfterCopy() })
+	verifyItem.Checked = c.verifyAfterCopy
+
 	briefColumnsItem := fyne.NewMenuItem("Brief Columns", nil)
 	briefColumnsItem.ChildMenu = c.buildBriefColumnsSubmenu(nil)
 
@@ -256,8 +280,12 @@ func (c *commander) doOpenMenu() {
 		fyne.NewMenuItem("Refresh Both Panes (F2 / Ctrl+R)", func() { c.doRefresh() }),
 		fyne.NewMenuItem("Switch Active Pane (Ctrl+Tab / Ctrl+O)", func() { c.toggleActivePane() }),
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { c.swapPanes() }),
+		fyne.NewMenuItem("Go Back (Alt+Left)", func() { c.goBackActive() }),
+		fyne.NewMenuItem("Go Forward (Alt+Right)", func() { c.goForwardActive() }),
 		fyne.NewMenuItem("Calculate Folder Sizes", func() { c.doCalculateFolderSizes() }),
+		fyne.NewMenuItem("Find Duplicate Files… (Ctrl+D)", func() { c.doFindDuplicates() }),
 		fyne.NewMenuItem("Search… (Ctrl+F)", func() { c.showSearch(c.activePane()) }),
+		fyne.NewMenuItem("Quick Filter… (Ctrl+S)", func() { c.toggleFilterActive() }),
 		fyne.NewMenuItem("Compare/Synchronize Directories…", func() { c.showCompareSync(comparePrimaryNone) }),
 		fyne.NewMenuItem("Copy (Ctrl/Cmd+C)", func() { c.doCopyToClipboard() }),
 		fyne.NewMenuItem("Paste (Ctrl/Cmd+V)", func() { c.doPaste() }),
@@ -267,6 +295,7 @@ func (c *commander) doOpenMenu() {
 		hiddenFilesItem,
 		driveBarItem,
 		cmdLineItem,
+		verifyItem,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Panel Colors…", func() {
 			showColorSchemeSettings(c.app, c.win, c.applyColorScheme)

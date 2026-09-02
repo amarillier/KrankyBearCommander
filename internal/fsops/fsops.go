@@ -7,8 +7,11 @@ package fsops
 
 import (
 	"archive/zip"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
@@ -52,6 +55,17 @@ type ConflictFunc func(destPath string) (action ConflictAction, newName string)
 // ErrCancelled is returned when a ConflictFunc returns ConflictCancel.
 var ErrCancelled = errors.New("operation cancelled")
 
+// VerifyError indicates a file copied by CopyVerify/MoveVerify failed hash
+// verification against its source even after retrying (see copyFile).
+// Move's usual "never delete the original until the copy has fully
+// succeeded" guarantee treats this exactly like any other copy failure, so
+// the source is left untouched.
+type VerifyError struct{ Path string }
+
+func (e *VerifyError) Error() string {
+	return fmt.Sprintf("%s failed verification after copying (hash mismatch after %d attempts)", e.Path, retryAttempts)
+}
+
 func noProgress(int64, int64, string) bool       { return true }
 func noConflict(string) (ConflictAction, string) { return ConflictOverwrite, "" }
 
@@ -88,6 +102,18 @@ func retryTransient(fn func() error) error {
 // source's base name. Conflicts are resolved per file (directories are
 // merged, not replaced wholesale).
 func Copy(sources []string, destDir string, progress ProgressFunc, resolve ConflictFunc) error {
+	return copyAll(sources, destDir, progress, resolve, false)
+}
+
+// CopyVerify is Copy, but additionally re-reads each destination file from
+// disk after writing it and compares its hash against the source (see
+// copyFile) — retrying a mismatching file a few times before giving up, to
+// catch silent corruption a plain OS-level copy wouldn't notice.
+func CopyVerify(sources []string, destDir string, progress ProgressFunc, resolve ConflictFunc) error {
+	return copyAll(sources, destDir, progress, resolve, true)
+}
+
+func copyAll(sources []string, destDir string, progress ProgressFunc, resolve ConflictFunc, verify bool) error {
 	if progress == nil {
 		progress = noProgress
 	}
@@ -103,7 +129,7 @@ func Copy(sources []string, destDir string, progress ProgressFunc, resolve Confl
 	var done int64
 	for _, src := range sources {
 		dest := filepath.Join(destDir, filepath.Base(src))
-		if err := copyPath(src, dest, &done, total, progress, resolve); err != nil {
+		if err := copyPath(src, dest, &done, total, progress, resolve, verify); err != nil {
 			return err
 		}
 	}
@@ -118,6 +144,18 @@ func Copy(sources []string, destDir string, progress ProgressFunc, resolve Confl
 // all of them (rather than resetting per item), so a multi-item Move shows
 // one continuous progress bar instead of restarting at 0% for each item.
 func Move(sources []string, destDir string, progress ProgressFunc, resolve ConflictFunc) error {
+	return moveAll(sources, destDir, progress, resolve, false)
+}
+
+// MoveVerify is Move, but verifies each copied file the same way CopyVerify
+// does before removing its source original (a verification failure is just
+// another copy failure, so the source is left in place, same as any other
+// error during the copy+delete fallback).
+func MoveVerify(sources []string, destDir string, progress ProgressFunc, resolve ConflictFunc) error {
+	return moveAll(sources, destDir, progress, resolve, true)
+}
+
+func moveAll(sources []string, destDir string, progress ProgressFunc, resolve ConflictFunc, verify bool) error {
 	if progress == nil {
 		progress = noProgress
 	}
@@ -172,7 +210,7 @@ func Move(sources []string, destDir string, progress ProgressFunc, resolve Confl
 
 	var done int64
 	for _, p := range pending {
-		if err := copyPath(p.src, p.dest, &done, total, progress, noConflict); err != nil {
+		if err := copyPath(p.src, p.dest, &done, total, progress, noConflict, verify); err != nil {
 			return err
 		}
 		if !progress(done, total, "Cleaning up: "+filepath.Base(p.src)) {
@@ -243,7 +281,7 @@ func Duplicate(path string) (string, error) {
 		return "", err
 	}
 	var done int64
-	if err := copyPath(path, dest, &done, total, noProgress, noConflict); err != nil {
+	if err := copyPath(path, dest, &done, total, noProgress, noConflict, false); err != nil {
 		return "", err
 	}
 	return dest, nil
@@ -644,18 +682,18 @@ func totalSize(paths []string) (int64, error) {
 	return total, nil
 }
 
-func copyPath(src, dest string, done *int64, total int64, progress ProgressFunc, resolve ConflictFunc) error {
+func copyPath(src, dest string, done *int64, total int64, progress ProgressFunc, resolve ConflictFunc, verify bool) error {
 	info, err := os.Lstat(src)
 	if err != nil {
 		return err
 	}
 	if info.IsDir() {
-		return copyDir(src, dest, done, total, progress, resolve)
+		return copyDir(src, dest, done, total, progress, resolve, verify)
 	}
-	return copyFile(src, dest, info, done, total, progress, resolve)
+	return copyFile(src, dest, info, done, total, progress, resolve, verify)
 }
 
-func copyDir(src, dest string, done *int64, total int64, progress ProgressFunc, resolve ConflictFunc) error {
+func copyDir(src, dest string, done *int64, total int64, progress ProgressFunc, resolve ConflictFunc, verify bool) error {
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
@@ -672,14 +710,26 @@ func copyDir(src, dest string, done *int64, total int64, progress ProgressFunc, 
 		return err
 	}
 	for _, e := range entries {
-		if err := copyPath(filepath.Join(src, e.Name()), filepath.Join(dest, e.Name()), done, total, progress, resolve); err != nil {
+		if err := copyPath(filepath.Join(src, e.Name()), filepath.Join(dest, e.Name()), done, total, progress, resolve, verify); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func copyFile(src, dest string, info os.FileInfo, done *int64, total int64, progress ProgressFunc, resolve ConflictFunc) error {
+// copyFile resolves any destination conflict, then copies src to the
+// resolved dest. When verify is true, the whole copy is wrapped in a retry
+// loop (up to retryAttempts, same constant the wrong-diskette retry uses):
+// each attempt copies the file (accumulating a sha256 hash of the bytes as
+// they're streamed — no extra read of the source) and then independently
+// re-reads the just-written destination from disk to compare hashes,
+// catching corruption introduced somewhere in the write path that a plain
+// OS-level copy wouldn't notice. A mismatch resets the shared progress
+// counter and retries from scratch; final failure returns *VerifyError,
+// leaving dest as whatever the last failed attempt wrote (Move's caller
+// never removes the source after a copyPath error, verify failures
+// included).
+func copyFile(src, dest string, info os.FileInfo, done *int64, total int64, progress ProgressFunc, resolve ConflictFunc, verify bool) error {
 	if _, err := os.Lstat(dest); err == nil {
 		action, newName := resolve(dest)
 		switch action {
@@ -698,10 +748,50 @@ func copyFile(src, dest string, info os.FileInfo, done *int64, total int64, prog
 		}
 	}
 
+	attempts := 1
+	if verify {
+		attempts = retryAttempts
+	}
+	startDone := *done
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		*done = startDone
+		srcHash, err := copyFileOnce(src, dest, info, done, total, progress, verify)
+		if err != nil {
+			return err
+		}
+		if !verify {
+			return nil
+		}
+		match, verr := verifyDestHash(dest, srcHash, done, total, progress)
+		if verr != nil {
+			return verr
+		}
+		if match {
+			return nil
+		}
+		lastErr = &VerifyError{Path: dest}
+		if attempt < attempts {
+			time.Sleep(retryDelay)
+		}
+	}
+	return lastErr
+}
+
+// copyFileOnce performs one copy attempt of src to the already-resolved,
+// conflict-free dest — the byte-streaming loop copyFile used to do inline
+// before verify support split it out into its own retryable step. Returns
+// src's sha256 hex digest when verify is true (computed for free while
+// streaming, no extra read), or "" otherwise.
+func copyFileOnce(src, dest string, info os.FileInfo, done *int64, total int64, progress ProgressFunc, verify bool) (string, error) {
 	buf := make([]byte, 256*1024)
 	var in, out *os.File
 	var n int
 	var rerr error
+	var hasher hash.Hash
+	if verify {
+		hasher = sha256.New()
+	}
 
 	// The open + very first read is exactly where a removable drive's
 	// transient "wrong volume" condition (IsTransientRemovableMediaError)
@@ -732,7 +822,7 @@ func copyFile(src, dest string, info os.FileInfo, done *int64, total int64, prog
 		return nil
 	})
 	if openErr != nil {
-		return openErr
+		return "", openErr
 	}
 	defer in.Close()
 	defer out.Close()
@@ -740,20 +830,47 @@ func copyFile(src, dest string, info os.FileInfo, done *int64, total int64, prog
 	for {
 		if n > 0 {
 			if _, werr := out.Write(buf[:n]); werr != nil {
-				return werr
+				return "", werr
+			}
+			if hasher != nil {
+				hasher.Write(buf[:n])
 			}
 			*done += int64(n)
 			if !progress(*done, total, src) {
-				return ErrCancelled
+				return "", ErrCancelled
 			}
 		}
 		if rerr == io.EOF {
 			break
 		}
 		if rerr != nil {
-			return rerr
+			return "", rerr
 		}
 		n, rerr = in.Read(buf)
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return "", err
+	}
+	if hasher == nil {
+		return "", nil
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// verifyDestHash independently re-reads dest from disk (not the bytes still
+// held in memory from the write above) and compares its hash against
+// srcHash — the actual point of "verify after copy": catching corruption
+// introduced somewhere in the write path, not just replaying the same
+// in-flight bytes. Progress is reported via the existing ProgressFunc with a
+// "Verifying: <name>" phase label, the same non-incrementing-total
+// convention Move's own "Cleaning up: <name>" phase already uses.
+func verifyDestHash(dest, srcHash string, done *int64, total int64, progress ProgressFunc) (bool, error) {
+	label := "Verifying: " + filepath.Base(dest)
+	destHash, err := hashFileForVerify(dest, func(int64) bool {
+		return progress(*done, total, label)
+	})
+	if err != nil {
+		return false, err
+	}
+	return destHash == srcHash, nil
 }

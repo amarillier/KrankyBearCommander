@@ -101,11 +101,12 @@ F7  MkDir                 Creates a new folder in the active pane, prefilled
 F8  Delete                Sends the selection to the trash.
 ⇧F8 Delete Permanently    Bypasses the trash — cannot be undone. Mouse/menu
                           only (see KNOWN LIMITATIONS).
-F9  Menu                  New tab, view mode, Refresh, Swap Panes, Calculate
-                          Folder Sizes, Search, Copy/Paste, Multi-Rename
-                          Tool, Show Hidden Files, Show Volume/Drive
-                          Toolbar, Panel Colors, Editors, 7-Zip Binary
-                          Path, Help, Check for Updates, About.
+F9  Menu                  New tab, view mode, Refresh, Swap Panes, Go
+                          Back/Forward, Calculate Folder Sizes, Search,
+                          Quick Filter, Copy/Paste, Multi-Rename Tool,
+                          Show Hidden Files, Show Volume/Drive Toolbar,
+                          Panel Colors, Editors, 7-Zip Binary Path, Help,
+                          Check for Updates, About.
 F10 Quit                  Quits ` + appName + `.
 Enter                     Opens/navigates into the cursor row, same as a
                           double-click.
@@ -117,8 +118,11 @@ Double-click               A directory navigates into it; a file opens with
 
 VOLUME/DRIVE TOOLBAR:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-A row above each pane's tabs: \ (home), .. (up one level), a refresh
-button (same as F2, and also re-scans for newly connected drives), then
+A row above each pane's tabs: \ (home), ◀/▶ (Go Back / Go Forward through
+this tab's own directory history — same as Alt+Left/Alt+Right, see QUICK
+FILTER & NAVIGATION HISTORY below), .. (up one level), a refresh button
+(same as F2, and also re-scans for newly connected drives), an eye button
+(toggles this tab's Quick Filter bar — same as Ctrl+S, see below), then
 one button per filesystem root — drive letters on Windows, or "/" plus
 any mounted external volume (USB drive, SD card) on macOS/Linux.
 Scrollable, so a machine with many drives doesn't force the pane wider.
@@ -338,6 +342,22 @@ into (Unlimited / Just this folder / 1-10 levels deep) — guards against an
 accidental search of somewhere huge (e.g. "/") running away; reopens with
 whatever you last chose.
 
+QUICK FILTER & NAVIGATION HISTORY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ctrl+S (or the eye button on the volume/drive toolbar) shows this tab's
+quick-filter bar — type to narrow the current listing live, entirely
+client-side (no disk re-read, unlike Search above). Escape or the bar's
+own close button hides it again and clears the query; Ctrl+S a second
+time does the same. Navigating away (Home, .., a new directory, a drive
+button) clears the filter too, the same way it clears selection/cursor,
+so a filter from one directory never silently carries into the next.
+Alt+Left / Alt+Right (or the ◀/▶ buttons on the volume/drive toolbar, or
+View menu / F9 popup → Go Back / Go Forward) step back and forward
+through this tab's own browsing history, browser-style — independent per
+tab, and per pane. Any real navigation (not the filter) records a step;
+going back and then somewhere new drops whatever was ahead, exactly like
+a browser's own Back/Forward.
+
 CONNECTIONS MANAGER:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 File menu / F9 popup → Connections…, or the 🖥 toolbar button next to 🔍
@@ -422,6 +442,10 @@ KEYBOARD SHORTCUTS:
 • Ctrl+R - Refresh Both Panes, same as F2 or either pane's own ⟳ button —
   all three always refresh both panes and drive bars, not just one.
 • Ctrl+F - Search (active pane).
+• Ctrl+S - toggle the active tab's Quick Filter bar (see QUICK FILTER &
+  NAVIGATION HISTORY above).
+• Alt+Left / Alt+Right - Go Back / Go Forward through the active tab's own
+  directory history (see QUICK FILTER & NAVIGATION HISTORY above).
 • Ctrl+L - Jump to the Command Line bar (see COMMAND LINE above), showing
   it first if it's currently hidden.
 • Ctrl+Tab or Ctrl+O - Switch Active Pane, same as clicking into the other

@@ -40,6 +40,7 @@ type pane struct {
 	onConnections        func()                                                            // Connection button clicked; commander owns the Connections manager (connections_ui.go), opening a new tab in THIS pane
 	onLauncher           func()                                                            // Application Launcher button clicked; commander owns the launcher popup (launcher_ui.go)
 	onCompareSync        func()                                                            // this pane's Compare/Sync button clicked; commander opens the dialog with THIS pane as the suggested primary (comparesync_ui.go)
+	onFindDuplicates     func()                                                            // this pane's Find Duplicates button clicked; commander scans THIS pane's active tab (duplicatefinder_ui.go)
 	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)                   // Enter/double-click on a file inside an open archive; commander extracts + opens it (archive_browse_ui.go)
 	onEject              func(root string) error                                           // Eject clicked on a drive button; commander navigates both panes off it first (drivebutton_ui.go)
 	onRefreshAll         func()                                                            // this pane's own ⟳ drive-bar button clicked; commander refreshes both panes (see commander.doRefresh) rather than just this one
@@ -51,9 +52,10 @@ type pane struct {
 	views  []*fileListView
 	states []*panelstate.State
 
-	statusLabel *widget.Label
-	lockBtn     *ttwidget.Button
-	driveBar    *container.Scroll
+	statusLabel         *widget.Label
+	lockBtn             *ttwidget.Button
+	backBtn, forwardBtn *ttwidget.Button // drive bar's history nav — enabled/disabled by refreshNavButtons
+	driveBar            *container.Scroll
 
 	// driveRootsGen guards buildDriveBarContent's background Roots() fetch
 	// (see there) against a stale/superseded result — bumped every time the
@@ -69,8 +71,8 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onLauncher func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func(), onChromeChanged func(), onReconnect func(connID string) (vfs.FileSystem, error), onCompareSync func(), isPinned func(v *fileListView) bool) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onLauncher: onLauncher, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll, onChromeChanged: onChromeChanged, onReconnect: onReconnect, onCompareSync: onCompareSync, isPinned: isPinned}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onLauncher func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func(), onChromeChanged func(), onReconnect func(connID string) (vfs.FileSystem, error), onCompareSync func(), onFindDuplicates func(), isPinned func(v *fileListView) bool) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onLauncher: onLauncher, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll, onChromeChanged: onChromeChanged, onReconnect: onReconnect, onCompareSync: onCompareSync, onFindDuplicates: onFindDuplicates, isPinned: isPinned}
 
 	p.statusLabel = widget.NewLabel("")
 
@@ -149,6 +151,15 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	})
 	compareSyncBtn.SetToolTip("Compare/Synchronize Directories — treats THIS pane as the source of truth for suggested actions")
 
+	findDuplicatesBtn := ttwidget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
+		p.onActivated()
+		if p.onFindDuplicates != nil {
+			p.onFindDuplicates()
+		}
+		unfocus()
+	})
+	findDuplicatesBtn.SetToolTip("Find Duplicate Files (Ctrl+D) — scans this tab's current directory recursively for byte-identical files")
+
 	refreshBtn := ttwidget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
 		p.onActivated()
 		if p.onRefreshAll != nil {
@@ -158,9 +169,12 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	})
 	refreshBtn.SetToolTip("Refresh both panes (F2 / Ctrl+R) and re-scan for newly connected drives — same as the drive bar's own refresh button below")
 
-	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn, connectionsBtn, launcherBtn, compareSyncBtn, refreshBtn)
-	p.driveBar = container.NewHScroll(p.buildDriveBarContent())
+	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn, connectionsBtn, launcherBtn, compareSyncBtn, findDuplicatesBtn, refreshBtn)
 
+	// p.tabs must exist before buildDriveBarContent runs: it ends by calling
+	// refreshNavButtons, which reads p.activeView() -> p.tabs.SelectedIndex()
+	// — a nil p.tabs there panics (DocTabs.SelectedIndex on a nil receiver)
+	// during construction, before the window ever shows.
 	p.tabs = container.NewDocTabs()
 	p.tabs.CreateTab = func() *container.TabItem {
 		p.onActivated()
@@ -191,6 +205,8 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 		p.tabs.RemoveIndex(idx)
 		p.refreshChrome()
 	}
+
+	p.driveBar = container.NewHScroll(p.buildDriveBarContent())
 
 	// No default tab is added here: for a returning user, commander.go's
 	// loadLayout() (right after both panes are constructed) replaces
@@ -394,6 +410,24 @@ func (p *pane) buildDriveBarContent() fyne.CanvasObject {
 	homeBtn := ttwidget.NewButton("\\", func() { p.onActivated(); p.activateHome(); unfocus() })
 	homeBtn.SetToolTip("Go to the locked directory (if locked) or your home directory")
 
+	p.backBtn = ttwidget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
+		p.onActivated()
+		if v := p.activeView(); v != nil {
+			v.GoBack()
+		}
+		unfocus()
+	})
+	p.backBtn.SetToolTip("Go back (Alt+Left)")
+
+	p.forwardBtn = ttwidget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() {
+		p.onActivated()
+		if v := p.activeView(); v != nil {
+			v.GoForward()
+		}
+		unfocus()
+	})
+	p.forwardBtn.SetToolTip("Go forward (Alt+Right)")
+
 	upBtn := ttwidget.NewButton("..", func() {
 		p.onActivated()
 		if v := p.activeView(); v != nil {
@@ -412,7 +446,29 @@ func (p *pane) buildDriveBarContent() fyne.CanvasObject {
 	})
 	refreshBtn.SetToolTip("Refresh both panes (F2) and re-scan for newly connected drives")
 
-	bar := container.NewHBox(homeBtn, upBtn, refreshBtn, widget.NewSeparator())
+	// An eye (VisibilityIcon), not the pane toolbar's own magnifier
+	// (SearchIcon): quick-filter narrows what's already visible in this
+	// tab rather than searching subfolders, and the two buttons sitting
+	// near each other with the same glyph would read as duplicates.
+	filterBtn := ttwidget.NewButtonWithIcon("", theme.VisibilityIcon(), func() {
+		p.onActivated()
+		v := p.activeView()
+		if v == nil {
+			return
+		}
+		if v.FilterVisible() {
+			v.HideFilterBar()
+			unfocus()
+		} else {
+			// No unfocus() here, matching searchBtn/launcherBtn above:
+			// ShowFilterBar focuses the filter field so typing works
+			// immediately.
+			v.ShowFilterBar()
+		}
+	})
+	filterBtn.SetToolTip("Quick Filter (Ctrl+S): narrow this tab's listing as you type")
+
+	bar := container.NewHBox(homeBtn, p.backBtn, p.forwardBtn, upBtn, refreshBtn, filterBtn, widget.NewSeparator())
 
 	// Roots() lists mounted volumes (localfs.Roots walks /Volumes or
 	// /media on macOS/Linux) — this can hang for a long time if it
@@ -438,7 +494,29 @@ func (p *pane) buildDriveBarContent() fyne.CanvasObject {
 		})
 	}()
 
+	p.refreshNavButtons()
 	return bar
+}
+
+// refreshNavButtons enables/disables the drive bar's Back/Forward buttons
+// per the active tab's history — called here (both at construction and
+// every rescanDriveBar rebuild, since that replaces the buttons entirely)
+// and from refreshChrome (after any navigation).
+func (p *pane) refreshNavButtons() {
+	if p.backBtn == nil || p.forwardBtn == nil {
+		return
+	}
+	v := p.activeView()
+	if v != nil && v.CanGoBack() {
+		p.backBtn.Enable()
+	} else {
+		p.backBtn.Disable()
+	}
+	if v != nil && v.CanGoForward() {
+		p.forwardBtn.Enable()
+	} else {
+		p.forwardBtn.Disable()
+	}
 }
 
 // appendDriveButtons adds one button per root onto bar — split out of
@@ -560,6 +638,7 @@ func (p *pane) refreshChrome() {
 	} else {
 		p.lockBtn.SetText("🔓")
 	}
+	p.refreshNavButtons()
 	// Switching tabs changes which cursor/selection applies; reset until the
 	// newly active view reports its own (Reload, called when a tab is built
 	// or re-selected, does so via onCursorInfo/onSelection).

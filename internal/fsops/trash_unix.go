@@ -63,7 +63,7 @@ func trashPlatform(path string) error {
 		return err
 	}
 	var done int64
-	if err := copyPath(abs, dest, &done, total, noProgress, noConflict); err != nil {
+	if err := copyPath(abs, dest, &done, total, noProgress, noConflict, false); err != nil {
 		os.Remove(infoPath)
 		return err
 	}

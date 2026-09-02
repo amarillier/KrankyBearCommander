@@ -109,7 +109,7 @@ func navigateOffRoot(p *pane, root string) {
 			!strings.HasPrefix(current, trimmedRoot+"/") && !strings.HasPrefix(current, trimmedRoot+`\`) {
 			continue
 		}
-		v.JumpTo(p.defaultHome())
+		v.jumpNoHistory(p.defaultHome()) // eject safety, not user intent — see jumpNoHistory
 	}
 }
 

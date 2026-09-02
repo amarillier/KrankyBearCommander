@@ -189,18 +189,35 @@ func compareSideText(e *vfs.Entry) string {
 // showCompareDialog reviews rows and, on confirm, acts on whichever ones
 // are no longer set to Skip.
 func (c *commander) showCompareDialog(rows []compareRow, leftView, rightView *fileListView) {
+	// Name gets all remaining space and ellipsizes instead of overflowing
+	// into Left/Right/Action next to it (an equal-width grid let a long
+	// name visually overlap them, same unreadable-column bug duplicate
+	// finder's own dialog had — see duplicatefinder_ui.go's showDuplicatesDialog).
+	// Left/Right/Action stay at their natural width since their text is a
+	// fixed-format size+mtime string, not user-controlled length.
 	list := widget.NewList(
 		func() int { return len(rows) },
 		func() fyne.CanvasObject {
-			return container.NewGridWithColumns(4, widget.NewLabel(""), widget.NewLabel(""), widget.NewLabel(""), widget.NewSelect(nil, nil))
+			nameLbl := widget.NewLabel("")
+			nameLbl.Truncation = fyne.TextTruncateEllipsis
+			leftLbl := widget.NewLabel("")
+			rightLbl := widget.NewLabel("")
+			sel := widget.NewSelect(nil, nil)
+			trailing := container.NewHBox(leftLbl, rightLbl, sel)
+			return container.NewBorder(nil, nil, nil, trailing, nameLbl)
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
-			row := o.(*fyne.Container).Objects
+			row := o.(*fyne.Container)
+			nameLbl := row.Objects[0].(*widget.Label)
+			trailing := row.Objects[1].(*fyne.Container)
+			leftLbl := trailing.Objects[0].(*widget.Label)
+			rightLbl := trailing.Objects[1].(*widget.Label)
+			sel := trailing.Objects[2].(*widget.Select)
+
 			r := &rows[id]
-			row[0].(*widget.Label).SetText(r.name)
-			row[1].(*widget.Label).SetText(compareSideText(r.left))
-			row[2].(*widget.Label).SetText(compareSideText(r.right))
-			sel := row[3].(*widget.Select)
+			nameLbl.SetText(r.name)
+			leftLbl.SetText(compareSideText(r.left))
+			rightLbl.SetText(compareSideText(r.right))
 			sel.Options = r.options
 			sel.OnChanged = nil // avoid firing while we set it up for a (possibly different) row being recycled
 			sel.SetSelected(r.action)
@@ -208,11 +225,13 @@ func (c *commander) showCompareDialog(rows []compareRow, leftView, rightView *fi
 		},
 	)
 
-	header := container.NewGridWithColumns(4,
+	header := container.NewBorder(nil, nil, nil,
+		container.NewHBox(
+			widget.NewLabelWithStyle("Left", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Right", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle("Action", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		),
 		widget.NewLabelWithStyle("Name", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Left", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Right", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Action", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
 	content := container.NewBorder(
 		container.NewVBox(widget.NewLabel(fmt.Sprintf("%d item(s) differ or are missing on one side:", len(rows))), header),
@@ -254,11 +273,11 @@ func (c *commander) executeCompareSync(rows []compareRow, leftView, rightView *f
 		return
 	}
 	if len(toRight) > 0 {
-		verb, op := crossFSCopyOp(leftView, rightView)
+		verb, op := c.crossFSCopyOp(leftView, rightView)
 		c.runFileOp(verb+"ing", toRight, rightView.CurrentPath(), op, c.left)
 	}
 	if len(toLeft) > 0 {
-		verb, op := crossFSCopyOp(rightView, leftView)
+		verb, op := c.crossFSCopyOp(rightView, leftView)
 		c.runFileOp(verb+"ing", toLeft, leftView.CurrentPath(), op, c.right)
 	}
 	if len(deleteLeft) > 0 {

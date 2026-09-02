@@ -45,6 +45,7 @@ type commander struct {
 	// into a pane, without either file needing to know the other's details.
 	launcherPopupAdd func(name, command string)
 	showHiddenFiles  bool   // dotfile visibility, shared across both panes — see toggleHiddenFiles
+	verifyAfterCopy  bool   // hash-verify local Copy/Move — see toggleVerifyAfterCopy
 	showDriveBar     bool   // volume/drive toolbar visibility, shared across both panes — see toggleDriveBar
 	showCmdLine      bool   // command-line bar visibility — see toggleShowCmdLine (cmdline_ui.go)
 	briefColumns     int    // Brief view column count, shared across both panes (0 = Auto) — see setBriefColumns
@@ -70,6 +71,7 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c := &commander{app: a, win: win, fs: localfs.New()}
 	c.colorScheme = loadColorScheme(a)
 	c.showHiddenFiles = a.Preferences().Bool(prefShowHiddenFiles)
+	c.verifyAfterCopy = a.Preferences().Bool(prefVerifyAfterCopy)
 	c.showDriveBar = a.Preferences().BoolWithFallback(prefShowDriveBar, true)
 	c.showCmdLine = a.Preferences().BoolWithFallback(prefShowCmdLine, true)
 	c.briefColumns = a.Preferences().IntWithFallback(prefBriefColumns, 0)
@@ -85,8 +87,8 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.loadLaunchers()
 	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryLeft) }, c.isPinnedByBackgroundOp)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryRight) }, c.isPinnedByBackgroundOp)
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryLeft) }, c.doFindDuplicates, c.isPinnedByBackgroundOp)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryRight) }, c.doFindDuplicates, c.isPinnedByBackgroundOp)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5
@@ -151,6 +153,36 @@ func (c *commander) toggleActivePane() {
 	}
 }
 
+// goBackActive/goForwardActive are Alt+Left/Alt+Right (and the drive bar's
+// Back/Forward buttons): browser-style navigation history for the active
+// pane's active tab — see panelstate.State.GoBack/GoForward.
+func (c *commander) goBackActive() {
+	if v := c.activePane().activeView(); v != nil {
+		v.GoBack()
+	}
+}
+
+func (c *commander) goForwardActive() {
+	if v := c.activePane().activeView(); v != nil {
+		v.GoForward()
+	}
+}
+
+// toggleFilterActive is Ctrl+S: shows (and focuses) the active pane's
+// active tab's incremental quick-filter bar, or hides and clears it again
+// if it's already open — TotalCmd's Ctrl+S quick-filter convention.
+func (c *commander) toggleFilterActive() {
+	v := c.activePane().activeView()
+	if v == nil {
+		return
+	}
+	if v.FilterVisible() {
+		v.HideFilterBar()
+	} else {
+		v.ShowFilterBar()
+	}
+}
+
 // swapPanes exchanges the left and right panes' entire tab contents (paths,
 // locks, view modes, sort, selection) — which pane is "active" stays with
 // the visual slot (left/right), not the content, matching classic
@@ -199,6 +231,22 @@ func (c *commander) toggleHiddenFiles() {
 	for _, v := range c.right.views {
 		v.Reload()
 	}
+}
+
+// prefVerifyAfterCopy persists the "Verify After Copy" toggle, same pattern
+// as prefShowHiddenFiles — an app-wide setting (View menu / F9 popup), off
+// by default since it roughly doubles local Copy/Move's I/O (re-reading
+// every destination file after writing it).
+const prefVerifyAfterCopy = "verifyAfterCopy"
+
+// toggleVerifyAfterCopy flips whether local Copy/Move hash-compares each
+// destination file against its source after copying (fsops.CopyVerify/
+// MoveVerify — see crossFSCopyOp, fileops_ui.go) and persists it. Unlike
+// toggleHiddenFiles, nothing needs reloading — this only changes behavior
+// for copies/moves that haven't happened yet.
+func (c *commander) toggleVerifyAfterCopy() {
+	c.verifyAfterCopy = !c.verifyAfterCopy
+	c.app.Preferences().SetBool(prefVerifyAfterCopy, c.verifyAfterCopy)
 }
 
 // prefShowDriveBar persists the volume/drive toolbar's visibility, same

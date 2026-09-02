@@ -45,6 +45,22 @@ type State struct {
 	Selected map[string]bool // selected entry names within Path
 	Cursor   string          // name of the cursor row within Path
 
+	// Filter is the incremental quick-filter query (TotalCmd's Ctrl+S
+	// convention) — a case-insensitive substring match against entry
+	// names, applied client-side without a disk re-read (see filelist.go's
+	// SetFilter/applyFilterAndSort). Cleared by Navigate/Jump like
+	// Selected/Cursor — a filter for one directory shouldn't silently
+	// carry into the next. Not persisted (see layout.go).
+	Filter string
+
+	// Back/Forward hold this tab's browser-style navigation history — not
+	// persisted (see layout.go), matching Selected/Cursor's precedent of
+	// being session-only. Filled by RecordHistory/GoBack/GoForward;
+	// callers decide which navigations are history-worthy (see
+	// filelist.go's navigateTo/JumpTo vs. its internal jumpNoHistory).
+	Back    []string
+	Forward []string
+
 	// TabTitle, if set, overrides Path's own last-component-derived tab
 	// title (see paneview.go's tabLabel) — used for a remote connection tab
 	// (connections_ui.go), so it's titled with the connection's own
@@ -101,6 +117,7 @@ func (s *State) Navigate(target string) bool {
 	s.Path = target
 	s.Selected = map[string]bool{}
 	s.Cursor = ""
+	s.Filter = ""
 	return true
 }
 
@@ -114,6 +131,49 @@ func (s *State) Jump(target string) {
 	s.Path = target
 	s.Selected = map[string]bool{}
 	s.Cursor = ""
+	s.Filter = ""
+}
+
+// RecordHistory pushes prev (the tab's path just before this navigation)
+// onto the back stack and clears forward, the same way a browser
+// invalidates "forward" on any new navigation. A no-op if prev is empty or
+// already equal to the current Path (nothing actually changed) — callers
+// pass the pre-navigation Path, so this must run after Navigate/Jump has
+// already updated it.
+func (s *State) RecordHistory(prev string) {
+	if prev == "" || prev == s.Path {
+		return
+	}
+	s.Back = append(s.Back, prev)
+	s.Forward = nil
+}
+
+// CanGoBack/CanGoForward report whether GoBack/GoForward have anywhere to go.
+func (s *State) CanGoBack() bool    { return len(s.Back) > 0 }
+func (s *State) CanGoForward() bool { return len(s.Forward) > 0 }
+
+// GoBack pops the most recent back entry and returns it as the target to
+// jump to, pushing the current Path onto forward first (so GoForward can
+// undo it). ok is false, nothing changed, if there's nowhere to go.
+func (s *State) GoBack() (target string, ok bool) {
+	if len(s.Back) == 0 {
+		return "", false
+	}
+	target = s.Back[len(s.Back)-1]
+	s.Back = s.Back[:len(s.Back)-1]
+	s.Forward = append(s.Forward, s.Path)
+	return target, true
+}
+
+// GoForward is GoBack's mirror image.
+func (s *State) GoForward() (target string, ok bool) {
+	if len(s.Forward) == 0 {
+		return "", false
+	}
+	target = s.Forward[len(s.Forward)-1]
+	s.Forward = s.Forward[:len(s.Forward)-1]
+	s.Back = append(s.Back, s.Path)
+	return target, true
 }
 
 // HomeTarget returns where Home / "\" / "/" should navigate to: the locked

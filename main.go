@@ -9,16 +9,18 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/systray"
 
 	fynetooltip "github.com/dweymouth/fyne-tooltip"
 
 	"commander/internal/panelstate"
 	"commander/internal/startup"
+	"commander/internal/wakewatch"
 )
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "1.3.1" // see FyneApp.toml
+	appVersion = "1.4.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )
@@ -82,7 +84,34 @@ func main() {
 	// needs that handle to exist (see dragout_ui.go).
 	win.Show()
 	cmdr.installDragOut()
+	installWakeNudge(win)
 	a.Run()
+}
+
+// installWakeNudge proactively nudges the window right after this Mac wakes
+// from sleep, mirroring the manual resize/focus-change workaround Fyne
+// users report for the driver's known idle/background freeze — a
+// best-effort mitigation for an upstream bug, not a fix (see CLAUDE.md /
+// project memory "Intermittent freeze report"). A no-op on Windows/Linux
+// (wakewatch.Install is a no-op there).
+func installWakeNudge(win fyne.Window) {
+	wakewatch.Install(func() {
+		fyne.Do(func() { nudgeWindow(win) })
+	})
+}
+
+// nudgeWindow performs the same kind of trivial resize + focus change that
+// community reports say sometimes "wakes up" a stalled Fyne/GLFW window: a
+// 1-point resize and back, plus RequestFocus. Called on Fyne's main
+// goroutine (via fyne.Do from installWakeNudge's callback).
+func nudgeWindow(win fyne.Window) {
+	size := win.Canvas().Size()
+	win.Resize(size.Add(fyne.NewSize(1, 0)))
+	win.RequestFocus()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		fyne.Do(func() { win.Resize(size) })
+	}()
 }
 
 // ── Window geometry ──────────────────────────────────────────────────────────
@@ -160,6 +189,7 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 	backgroundOpsItem := fyne.NewMenuItem(backgroundOpsLabel, func() { cmdr.showBackgroundOperations() })
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("Calculate Folder Sizes (active pane)", func() { cmdr.doCalculateFolderSizes() }),
+		fyne.NewMenuItem("Find Duplicate Files (active pane) (Ctrl+D)", func() { cmdr.doFindDuplicates() }),
 		fyne.NewMenuItem("Search… (active pane) (Ctrl+F)", func() { cmdr.showSearch(cmdr.activePane()) }),
 		fyne.NewMenuItem("Compare/Synchronize Directories…", func() { cmdr.showCompareSync(comparePrimaryNone) }),
 		fyne.NewMenuItemSeparator(),
@@ -192,6 +222,11 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 		fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) })
 	})
 	cmdLineItem.Checked = cmdr.showCmdLine
+	verifyItem := fyne.NewMenuItem("Verify After Copy (Checksum)", func() {
+		cmdr.toggleVerifyAfterCopy()
+		fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) })
+	})
+	verifyItem.Checked = cmdr.verifyAfterCopy
 	briefColumnsItem := fyne.NewMenuItem("Brief Columns", nil)
 	briefColumnsItem.ChildMenu = cmdr.buildBriefColumnsSubmenu(func() { fyne.Do(func() { win.SetMainMenu(buildMenu(a, win)) }) })
 	viewMenu := fyne.NewMenu("View",
@@ -201,9 +236,13 @@ func buildMenu(a fyne.App, win fyne.Window) *fyne.MainMenu {
 		fyne.NewMenuItem("Refresh Both Panes (F2 / Ctrl+R)", func() { cmdr.doRefresh() }),
 		fyne.NewMenuItem("Switch Active Pane (Ctrl+Tab / Ctrl+O)", func() { cmdr.toggleActivePane() }),
 		fyne.NewMenuItem("Swap Panes (Ctrl+U)", func() { cmdr.swapPanes() }),
+		fyne.NewMenuItem("Go Back (Alt+Left)", func() { cmdr.goBackActive() }),
+		fyne.NewMenuItem("Go Forward (Alt+Right)", func() { cmdr.goForwardActive() }),
+		fyne.NewMenuItem("Quick Filter… (Ctrl+S)", func() { cmdr.toggleFilterActive() }),
 		hiddenFilesItem,
 		driveBarItem,
 		cmdLineItem,
+		verifyItem,
 		fyne.NewMenuItem("Panel Colors…", func() { showColorSchemeSettings(a, win, cmdr.applyColorScheme) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Light Theme", func() { setLightTheme(a) }),
@@ -248,6 +287,16 @@ func setupSystemTray(a fyne.App, win fyne.Window) {
 	)
 	desk.SetSystemTrayMenu(menu)
 	desk.SetSystemTrayIcon(resourceKrankyBearCommanderPng)
+
+	// Hover tooltip on the tray icon (Windows/macOS; no-op on Linux) --
+	// desktop.App has no tooltip setter, but fyne.io/systray (what Fyne's
+	// own driver already uses internally for the tray icon) does. Deferred
+	// slightly since, unlike Fyne's own SetSystemTrayIcon call above, a raw
+	// systray.SetTooltip call has no built-in retry/caching if the tray
+	// isn't fully ready yet.
+	time.AfterFunc(300*time.Millisecond, func() {
+		systray.SetTooltip(appName)
+	})
 }
 
 // "Now this is not the end. It is not even the beginning of the end. But it is, perhaps, the end of the beginning." Winston Churchill, November 10, 1942

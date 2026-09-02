@@ -68,8 +68,14 @@ type fileListView struct {
 	headerRow   fyne.CanvasObject // built once; also sizes Brief view's header-height spacer, so switching views doesn't shift the grid
 	briefScroll *container.Scroll // Brief view's own scroll container — rebuilt every render (buildBriefGrid), kept here so ScrollToCursor can reach it later
 
-	entries   []vfs.Entry // current directory's entries, sorted, excluding ".."
-	hasParent bool
+	entries    []vfs.Entry // currently displayed rows: allEntries filtered by state.Filter, then sorted — excludes ".."
+	allEntries []vfs.Entry // last full read, with the hidden-files filter already applied — the superset entries is (re)built from on every filter keystroke, without a disk re-read (see applyFilterAndSort)
+	hasParent  bool
+
+	// filterBar/filterField: the incremental quick-filter bar (Ctrl+S, see
+	// filter_ui.go) — built in Build(), hidden until ShowFilterBar.
+	filterBar   *fyne.Container
+	filterField *filterEntry
 
 	// reloadGen/closed/lastGood* support Reload's non-blocking read (see its
 	// doc comment): reloadGen is bumped at the start of every Reload call
@@ -197,8 +203,14 @@ func (v *fileListView) Build() fyne.CanvasObject {
 	v.retryBanner = container.NewBorder(nil, nil, nil, v.retryBtn, v.retryLabel)
 	v.retryBanner.Hide()
 
+	v.filterField = newFilterEntry(func(text string) { v.SetFilter(text) }, func() { v.HideFilterBar() })
+	v.filterField.SetPlaceHolder("Filter...")
+	clearFilterBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() { v.HideFilterBar() })
+	v.filterBar = container.NewBorder(nil, nil, widget.NewIcon(theme.SearchIcon()), clearFilterBtn, v.filterField)
+	v.filterBar.Hide()
+
 	v.Reload()
-	return container.NewBorder(v.retryBanner, nil, nil, nil, v.root)
+	return container.NewBorder(container.NewVBox(v.retryBanner, v.filterBar), nil, nil, nil, v.root)
 }
 
 // reloadTimeout bounds how long Reload waits for a directory read before
@@ -380,7 +392,7 @@ func (v *fileListView) retryFailedPath() {
 	if v.failedFS != nil {
 		v.fs = v.failedFS
 	}
-	v.JumpTo(v.failedPath)
+	v.jumpNoHistory(v.failedPath)
 }
 
 // reconnectAndRetry runs onReconnect (a real network connect — a few
@@ -428,7 +440,7 @@ func (v *fileListView) reconnectAndRetry(connID string) {
 				return
 			}
 			v.fs = fs
-			v.JumpTo(path)
+			v.jumpNoHistory(path)
 		})
 	}()
 }
@@ -471,33 +483,18 @@ func (v *fileListView) handleReadTimeout(path string, fs vfs.FileSystem) {
 	v.renderActiveView()
 }
 
-// applyEntries filters/sorts/renders a completed read's entries — shared by
-// the normal success path and handleReadResult's "directory vanished"
-// re-entry.
+// applyEntries applies a completed read's entries — shared by the normal
+// success path and handleReadResult's "directory vanished" re-entry. The
+// hidden-files filter is applied here, against the fresh read; the
+// incremental quick-filter and sort are applied separately by
+// applyFilterAndSort, since those need to re-run on every filter keystroke
+// without a disk re-read.
 func (v *fileListView) applyEntries(entries []vfs.Entry, prevRowCount int) {
 	if v.showHidden != nil && !v.showHidden() {
 		entries = visibleEntries(entries)
 	}
-	v.entries = panelstate.SortEntries(entries, v.state.SortField, v.state.SortAscending)
-	v.hasParent = v.fs.Dir(v.state.Path) != v.state.Path
-
-	// widget.Table clamps the ROW INDEX it starts drawing from when a
-	// scrolled-down listing shrinks underneath it, but not the raw pixel
-	// scroll offset used to position that row — so a directory that changes
-	// size while a tab sits open and scrolled (e.g. an external process
-	// deleting/rewriting files) can leave the Table showing a stale blank
-	// gap with only a few rows/dividers rendered near the bottom, all
-	// pinned to where the old, longer listing used to be. Snapping back to
-	// the top on any row-count change sidesteps it; Brief view doesn't need
-	// this since it rebuilds its own scroll container from scratch every
-	// render (see renderActiveView).
-	if v.table != nil && v.rowCount() != prevRowCount {
-		v.table.ScrollToTop()
-	}
-
-	v.refreshHeaderLabels()
-	v.renderActiveView()
-	v.reportSelection()
+	v.allEntries = entries
+	v.applyFilterAndSort(prevRowCount)
 }
 
 // Refresh repaints without re-reading the directory (selection/cursor moved).
@@ -1539,6 +1536,7 @@ func (v *fileListView) enterZip(zipPath string) {
 		}
 		return
 	}
+	prev := v.state.Path
 	if !v.state.Navigate(zipPath) {
 		zfs.Close()
 		if v.onStatus != nil {
@@ -1546,6 +1544,7 @@ func (v *fileListView) enterZip(zipPath string) {
 		}
 		return
 	}
+	v.state.RecordHistory(prev)
 	v.fs = zfs
 	v.reloadAfterNavigate()
 }
@@ -1558,9 +1557,11 @@ func (v *fileListView) enterZip(zipPath string) {
 // nothing needs to actually exist there. Reports false (tab left untouched)
 // if the tab is locked against navigation, same as enterZip.
 func (v *fileListView) enterListbox(root string, matches map[string]string) bool {
+	prev := v.state.Path
 	if !v.state.Navigate(root) {
 		return false
 	}
+	v.state.RecordHistory(prev)
 	v.fs = listboxfs.New(root, matches)
 	v.reloadAfterNavigate()
 	return true
@@ -1613,27 +1614,64 @@ func (v *fileListView) closeFS() {
 
 // navigateTo is casual in-pane browsing (double-click/Enter into a
 // subdirectory or ".."), which a locked tab may refuse — see JumpTo for
-// explicit-destination navigation that a lock never blocks.
+// explicit-destination navigation that a lock never blocks. Records
+// history (back/forward) — see panelstate.State.RecordHistory.
 func (v *fileListView) navigateTo(target string) {
 	v.adjustFSForTarget(target)
+	prev := v.state.Path
 	if !v.state.Navigate(target) {
 		if v.onStatus != nil {
 			v.onStatus("tab is locked")
 		}
 		return
 	}
+	v.state.RecordHistory(prev)
 	v.reloadAfterNavigate()
 }
 
 // JumpTo is an explicit "take me here" navigation (Favorites, Volumes, Home)
 // that always works, even on a fully locked tab, and never touches the
 // tab's lock — Home afterward still returns to the same locked root as
-// before the jump. See panelstate.State.Jump.
+// before the jump. See panelstate.State.Jump. Records history like
+// navigateTo; see jumpNoHistory for the internal-fixup callers (a
+// stalled-read revert, an eject-safety relocation) that must NOT count as
+// a user-driven navigation Back should remember.
 func (v *fileListView) JumpTo(target string) {
+	prev := v.state.Path
+	v.jumpNoHistory(target)
+	v.state.RecordHistory(prev)
+}
+
+// jumpNoHistory is JumpTo without the history recording — for
+// retryFailedPath, reconnectAndRetry, and drivebutton_ui.go's
+// navigateOffRoot, none of which reflect an actual user intent to "go
+// there."
+func (v *fileListView) jumpNoHistory(target string) {
 	v.adjustFSForTarget(target)
 	v.state.Jump(target)
 	v.reloadAfterNavigate()
 }
+
+// GoBack navigates to this tab's previous location, if any (browser-style
+// back) — a no-op if there's nowhere to go. Like JumpTo, never blocked by
+// a lock: this is an explicit "take me back," not casual browsing.
+func (v *fileListView) GoBack() {
+	if target, ok := v.state.GoBack(); ok {
+		v.jumpNoHistory(target)
+	}
+}
+
+// GoForward is GoBack's mirror image.
+func (v *fileListView) GoForward() {
+	if target, ok := v.state.GoForward(); ok {
+		v.jumpNoHistory(target)
+	}
+}
+
+// CanGoBack/CanGoForward report whether GoBack/GoForward have anywhere to
+// go — used to enable/disable the pane's Back/Forward toolbar buttons.
+func (v *fileListView) CanGoBack() bool    { return v.state.CanGoBack() }
+func (v *fileListView) CanGoForward() bool { return v.state.CanGoForward() }
 
 func (v *fileListView) reloadAfterNavigate() {
 	v.Reload()

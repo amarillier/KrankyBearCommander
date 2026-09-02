@@ -6,6 +6,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -164,7 +165,7 @@ func (c *commander) doCopy() {
 		return
 	}
 
-	verb, op := crossFSCopyOp(view, dstView)
+	verb, op := c.crossFSCopyOp(view, dstView)
 	showDialog(dialog.NewConfirm(verb, fmt.Sprintf("Copy %d item(s) to:\n%s", len(paths), target), func(ok bool) {
 		if !ok {
 			return
@@ -177,8 +178,12 @@ func (c *commander) doCopy() {
 // dstView's, as one fsOpFunc for runFileOp to drive — the single place F5
 // Copy and F6 Move both make this decision (see crossFSMoveOp), so a future
 // fourth combination only needs a change here. destDir passed to the
-// returned fsOpFunc must be one of dstView's own presented paths.
-func crossFSCopyOp(view, dstView *fileListView) (verb string, op fsOpFunc) {
+// returned fsOpFunc must be one of dstView's own presented paths. A method
+// (not a free function) so the local-local default case can see
+// c.verifyAfterCopy — Verify After Copy only covers local-local transfers
+// (see fsops.CopyVerify's doc comment); Download/Upload/crossConnCopy are
+// unaffected.
+func (c *commander) crossFSCopyOp(view, dstView *fileListView) (verb string, op fsOpFunc) {
 	srcSF, srcRemote := view.fs.(remoteConnFS)
 	dstSF, dstRemote := dstView.fs.(remoteConnFS)
 	switch {
@@ -188,6 +193,8 @@ func crossFSCopyOp(view, dstView *fileListView) (verb string, op fsOpFunc) {
 		return "Download", srcSF.Download
 	case dstRemote:
 		return "Upload", dstSF.Upload
+	case c.verifyAfterCopy:
+		return "Copy", fsops.CopyVerify
 	default:
 		return "Copy", fsops.Copy
 	}
@@ -274,6 +281,9 @@ func (c *commander) doMoveOrRename() {
 	_, srcRemote := view.fs.(remoteConnFS)
 	_, dstRemote := dstView.fs.(remoteConnFS)
 	op := fsOpFunc(fsops.Move)
+	if c.verifyAfterCopy {
+		op = fsops.MoveVerify
+	}
 	if srcRemote || dstRemote {
 		op = c.crossFSMoveOp(view, dstView)
 	}
@@ -291,7 +301,7 @@ func (c *commander) doMoveOrRename() {
 // after). Used whenever a Move touches a remote connection on either side;
 // a pure local-local Move keeps using fsops.Move directly, unchanged.
 func (c *commander) crossFSMoveOp(view, dstView *fileListView) fsOpFunc {
-	_, copyOp := crossFSCopyOp(view, dstView)
+	_, copyOp := c.crossFSCopyOp(view, dstView)
 	return func(sources []string, destDir string, progress fsops.ProgressFunc, resolve fsops.ConflictFunc) error {
 		if err := copyOp(sources, destDir, progress, resolve); err != nil {
 			return err
@@ -355,7 +365,11 @@ func (c *commander) performRename(view *fileListView, oldPath, newPath string, s
 			// Likely a cross-device rename; fall back to copy+delete into
 			// the target directory (the MVP fallback keeps the original
 			// name — a simultaneous cross-device rename isn't supported).
-			c.runFileOp("Moving", []string{oldPath}, filepath.Dir(newPath), fsops.Move, sourcePane)
+			moveFn := fsOpFunc(fsops.Move)
+			if c.verifyAfterCopy {
+				moveFn = fsops.MoveVerify
+			}
+			c.runFileOp("Moving", []string{oldPath}, filepath.Dir(newPath), moveFn, sourcePane)
 			return
 		}
 		sourcePane.activeView().Reload()
@@ -558,10 +572,14 @@ func (c *commander) runFileOp(verb string, sources []string, destDir string, op 
 			} else {
 				prog.Hide()
 			}
+			var verr *fsops.VerifyError
 			if err != nil && err != fsops.ErrCancelled {
-				if fsops.IsTransientRemovableMediaError(err) {
+				switch {
+				case errors.As(err, &verr):
+					dialog.ShowError(fmt.Errorf("%s failed verification after copying — its content didn't match the source even after retrying, so the copy was NOT completed for this file. Nothing else was affected.\n\n(%v)", filepath.Base(verr.Path), err), c.win)
+				case fsops.IsTransientRemovableMediaError(err):
 					dialog.ShowError(fmt.Errorf("the removable drive/card reader didn't respond to a read — this can happen briefly right after it's first inserted, before it's finished settling. Wait a few seconds and try again.\n\n(%v)", err), c.win)
-				} else {
+				default:
 					dialog.ShowError(err, c.win)
 				}
 			} else if backgrounded {
