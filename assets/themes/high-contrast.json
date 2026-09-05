@@ -1,0 +1,8 @@
+{
+  "name": "High Contrast",
+  "panelBG": "#000000",
+  "textNormal": "#ffffff",
+  "textSelected": "#ffff00",
+  "textCursor": "#ff3b30",
+  "textDir": "#00e5ff"
+}

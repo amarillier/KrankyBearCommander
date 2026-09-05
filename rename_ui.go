@@ -163,6 +163,23 @@ type renameEntry struct {
 
 func newRenameEntry(onCommit func(string), onCancel func()) *renameEntry {
 	e := &renameEntry{onCommit: onCommit, onCancel: onCancel}
+	// widget.NewEntry() sets Wrapping: fyne.TextTruncateClip; hand-building the
+	// struct instead (required so ExtendBaseWidget binds to *renameEntry, not a
+	// plain *widget.Entry — see the type's own doc comment) skips that, leaving
+	// Wrapping at its zero value fyne.TextWrapOff, which per its own doc
+	// "extends the widget's width to fit the text, no wrapping is applied." A
+	// long typed/set filename then permanently inflates this Entry's
+	// MinSize.Width to the full unwrapped text width, and since SetText is
+	// never reset back to "" once a rename ends (see beginInlineRename), that
+	// inflated MinSize sticks on this pooled cell object for the rest of the
+	// session — bubbling up through the Stack/Border it sits in and, once
+	// something up the tree (the pane's Split side) reflects it, the pane
+	// stays widened with no further action reversing it, matching a real
+	// bug report (2026-09-05): a pane auto-widens and won't shrink back after
+	// inline-renaming a long filename, surviving even a Brief/Full view
+	// switch. Setting this explicitly restores the same fixed, content-
+	// independent MinSize widget.NewEntry() would have given it.
+	e.Wrapping = fyne.TextWrap(fyne.TextTruncateClip)
 	e.ExtendBaseWidget(e)
 	e.OnSubmitted = func(text string) { e.commit(text) }
 	return e

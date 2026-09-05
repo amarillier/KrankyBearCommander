@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gofmt -l rename_ui.go)",
+      "Bash(gofmt -l help.go)",
+      "Read(//Users/ivan.marillier/Library/Preferences/fyne/com.github.amarillier.KrankyBearCommander/**)",
+      "Bash(python3 -m json.tool)"
+    ]
+  }
+}

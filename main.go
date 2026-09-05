@@ -20,7 +20,7 @@ import (
 
 const (
 	// appName    = "KrankyBear Commander"
-	appVersion = "1.5.0" // see FyneApp.toml
+	appVersion = "1.6.0" // see FyneApp.toml
 	appAuthor  = "Allan Marillier"
 	appID      = "com.github.amarillier.KrankyBearCommander"
 )

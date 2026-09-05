@@ -1,0 +1,8 @@
+{
+  "name": "Classic Blue",
+  "panelBG": "#000080",
+  "textNormal": "#00ffff",
+  "textSelected": "#ffff00",
+  "textCursor": "#ff0000",
+  "textDir": "#ffffff"
+}

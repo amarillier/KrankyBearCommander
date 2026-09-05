@@ -50,6 +50,15 @@ func (c *commander) fkeyActions() map[fyne.KeyName]func() {
 	}
 }
 
+// newTabActive opens a new tab (at the active pane's locked directory, if
+// locked, or its default home otherwise — see defaultHome) in whichever pane
+// is currently active — Ctrl+T/Cmd+T (registerShortcuts) and the F9 popup
+// menu's "New Tab (active pane)" both call this.
+func (c *commander) newTabActive() {
+	p := c.activePane()
+	p.addTabFromState(panelstate.New(p.defaultHome()))
+}
+
 // dispatchKey is the single entry point every keypress funnels through,
 // regardless of whether it arrived via the canvas-level SetOnTypedKey
 // fallback (nothing focused) or keyTable's onOtherKey (a table row focused).
@@ -178,6 +187,16 @@ func (c *commander) registerShortcuts() {
 			}
 			c.win.Canvas().Focus(c.cmdEntry)
 		})
+
+	// New Tab (active pane): Ctrl+T on Windows/Linux, Cmd+T on macOS — the
+	// convention iTerm2/browsers/TotalCmd all use for "open a new tab here",
+	// unlike Ctrl+U/M/R/F/D/S above (deliberately literal-Ctrl-everywhere).
+	// Both are real, non-Shift modifiers, so neither hits the
+	// triggersShortcut bug described above; Ctrl+T/Cmd+T aren't reserved
+	// elsewhere in this app or (so far as tested) by either OS itself.
+	newTab := func(fyne.Shortcut) { c.newTabActive() }
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyT, Modifier: desktop.ControlModifier}, newTab)
+	c.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyT, Modifier: desktop.SuperModifier}, newTab)
 }
 
 // keyBarButton builds one function-key bar button with a tooltip explaining
@@ -270,10 +289,7 @@ func (c *commander) doOpenMenu() {
 	}
 
 	menu := fyne.NewMenu("",
-		fyne.NewMenuItem("New Tab (active pane)", func() {
-			p := c.activePane()
-			p.addTabFromState(panelstate.New(p.defaultHome()))
-		}),
+		fyne.NewMenuItem("New Tab (active pane) (Ctrl+T / Cmd+T)", func() { c.newTabActive() }),
 		fyne.NewMenuItem("Brief View", func() { c.activePane().setViewMode(panelstate.ViewBrief) }),
 		fyne.NewMenuItem("Full View", func() { c.activePane().setViewMode(panelstate.ViewExpanded) }),
 		briefColumnsItem,

@@ -158,10 +158,14 @@ Launcher, Multi-Rename Tool, Change Attributes, a built-in Command Line,
   launches.
 - **Status bar** showing the cursor item's name, size/modified time (or item
   count for a directory), plus a live selection summary.
-- **Customizable panel colors** — defaults to a Norton-Commander-style
-  scheme (navy background, cyan/yellow/red text for normal/selected/cursor
-  rows), fully customizable via a color picker; independent of the
-  Light/Dark/System app theme.
+- **Customizable panel colors, with named themes** — pick from bundled
+  starter themes (Classic Blue's Norton-Commander navy, Allan's Blue,
+  Allan's Light Blue, Solarized Dark, High Contrast, Paper Light) via a
+  Theme dropdown, then fine-tune any individual color with a color picker
+  on top of whichever you picked; independent of the Light/Dark/System app
+  theme. Save your own tweaks as a new named theme, and Import/Export a
+  single theme as its own small `.json` file to share or move between
+  machines.
 - **Export/Import Settings** (File menu / F9 popup) — bundles everything
   that persists across launches (general preferences, Favorites, Editors,
   Connections, Application Launcher, window/tab layout) into one zip, for

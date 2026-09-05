@@ -1,0 +1,8 @@
+{
+  "name": "Paper Light",
+  "panelBG": "#f5f5f0",
+  "textNormal": "#202020",
+  "textSelected": "#0057d8",
+  "textCursor": "#c62828",
+  "textDir": "#8a4b00"
+}

@@ -306,11 +306,20 @@ apps to launch together.
 PANEL COLORS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 The pane colors (background, normal/selected/cursor-row/directory text)
-default to a Norton-Commander-style scheme and are fully customizable —
-F9 → Panel Colors, or View → Panel Colors — independent of the
-Light/Dark/System app theme (View menu), which governs the rest of the
-app's chrome. Directories (and "..") use their own color so they stand out
-from ordinary files at a glance.
+are fully customizable — F9 → Panel Colors, or View → Panel Colors —
+independent of the Light/Dark/System app theme (View menu), which governs
+the rest of the app's chrome. Directories (and "..") use their own color
+so they stand out from ordinary files at a glance.
+A Theme dropdown at the top of the dialog picks from several bundled
+starter color themes (Classic Blue's original Norton-Commander navy,
+Allan's Blue, Allan's Light Blue, Solarized Dark, High Contrast, and Paper
+Light) — pick one, then keep using the swatches below it to tweak any
+individual color further, the same way you always could. "Save As New
+Theme…" saves your current colors under a name of your choosing so they
+show up in the same dropdown from then on; "Import Theme…"/"Export Theme…"
+share a single theme as its own small .json file with someone else (or
+between your own machines) — separate from, and much lighter-weight than,
+the full Export/Import Settings below.
 
 HIDDEN FILES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -461,6 +470,9 @@ KEYBOARD SHORTCUTS:
   directory history (see QUICK FILTER & NAVIGATION HISTORY above).
 • Ctrl+L - Jump to the Command Line bar (see COMMAND LINE above), showing
   it first if it's currently hidden.
+• Ctrl+T (Cmd+T on macOS) - New Tab in the active pane, at its locked
+  directory if locked or its default home otherwise — the same convention
+  iTerm2, browsers, and TotalCmd use for "new tab here."
 • Ctrl+Tab or Ctrl+O - Switch Active Pane, same as clicking into the other
   one. Not plain Tab: Fyne itself intercepts that for cycling focus between
   controls, before this app ever sees it. Ctrl+O is there as a fallback on
