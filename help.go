@@ -49,6 +49,19 @@ PANES & TABS:
   target the OTHER pane's current directory.
 • "+" on a tab strip opens a new tab; the × on a tab closes it (at least one
   tab per pane always stays open).
+• ◀/▶ on the pane's own toolbar (next to Home) move the active tab one
+  position left/right within its pane — not the same ◀/▶ as the drive/
+  volume toolbar's Back/Forward history below. ⧉ duplicates the active tab
+  (same directory, view mode, sort, and lock state, but its own fresh
+  selection and Back/Forward history) onto the end of the same pane; ⇒
+  copies it the same way onto the end of the OTHER pane instead, leaving
+  the original tab where it is. All three are session-only, like tab order
+  already was.
+• A local tab's directory auto-refreshes when something changes it on disk
+  (a file dropped in by another program, a sync client, ...) — no need to
+  click Refresh yourself. Only the active tab of each pane is watched, and
+  only when it's a local directory; remote connections (SFTP/SMB/
+  FileAgent) and archive tabs still rely on the manual Refresh below.
 • 🔓/🔒 locks a tab to its current directory. Locking asks whether you can
   still open subdirectories from there: if allowed, Home/\/ / always snap
   back to the locked directory instead of going further; if not, the tab is
@@ -461,6 +474,23 @@ KEYBOARD SHORTCUTS:
 • Cmd/Ctrl+Q - Quit
 • Cmd/Ctrl+W - Close window
 • Cmd/Ctrl+M - Minimize
+
+WINDOWS: SOFTWARE OPENGL FALLBACK:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Windows only, and unnecessary on ordinary hardware — a small number of VMs
+and locked-down hosts have no usable hardware OpenGL, which would
+otherwise crash or hang this app's window on launch with no useful
+message. On first launch, ` + appName + ` silently detects that case and
+switches to a bundled Mesa3D software renderer instead, relaunching itself
+once to do so; every later launch on that same machine starts immediately
+with no further probing. Nothing to configure, and no effect at all on a
+machine with working hardware OpenGL. If the automatic switch can't
+complete (e.g. an install directory it can't write to), it's fixed by
+manually moving the two files from the install's mesa-fallback subfolder —
+opengl32.dll and libgallium_wgl.dll — into the same folder as
+` + appName + `.exe itself; doing that ahead of time (e.g. on a golden VM
+image reused for many identical no-GPU VMs) also skips the one-time
+probe-and-relaunch delay on that machine's very first launch.
 
 KNOWN LIMITATIONS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,9 +1,37 @@
 Future ideas:
 
 Later phase someday maybe if practical - low priority now
-- possibly allow dragging tabs within a pane to reorder - this adds complexity with a complete pane handling rewrite
-- maybe right click tab to duplicate, rename, duplicate or move to other pane - this adds complexity with a complete pane handling rewrite
 - drag from commander OUT to other apps on Linux (XDND) - shipped for macOS and Windows in 0.5.0 (see below); attempted for Linux/X11 too (2026-07-26) and paused as a known limitation rather than shipped: detection, target-window walking, and serving the actual file data all confirmed working against a real GTK/Nautilus target, but the target never sent XdndStatus back, so the handshake never completes and no file ever actually drops. Diagnosing further needs raw X11 protocol tracing (xtrace/Wireshark) to see what the target really sends - not pursued since Linux is the least-used of the three platforms here. Revisit if worth the time later (code is in internal/dragout, gated off via Supported() returning false)
+
+Version 1.5.0 - September 05, 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ NEW Move Tab Left/Right (the new ◀/▶ buttons on the pane's own toolbar,
+   next to Home — not to be confused with the drive/volume toolbar's own
+   ◀/▶ for Back/Forward history) — reorders the active tab one position
+   within its pane. Session-only, like the tab order already was.
+✨ NEW Duplicate Tab (the new ⧉ toolbar button) — appends a copy of the
+   active tab (same directory, view mode, sort, and lock state) to the end
+   of the same pane, with its own fresh selection and Back/Forward history
+   rather than sharing the original's.
+✨ NEW Copy Tab to Other Pane (the new ⇒ toolbar button) — appends a copy
+   of the active tab to the OTHER pane instead, leaving the original tab
+   where it is; same fresh-selection/history behavior as Duplicate Tab.
+✨ NEW Auto-refresh for local tabs — the active tab now live-updates when
+   its directory changes on disk (a file dropped in by a camera-card
+   import, a sync client, etc.) without needing a manual Refresh, TotalCmd's
+   own long-standing convenience. Local filesystem tabs only, and only the
+   active tab of each pane (at most two watched directories at a time,
+   total); remote connections (SFTP/SMB/FileAgent) and archive tabs are
+   unaffected and still rely on the existing manual Refresh.
+📝 DOCS Documented the Windows Mesa3D software OpenGL fallback (quietly
+   shipped in 1.4.0, see there — some VMs and locked-down hosts have no
+   usable hardware OpenGL, which would otherwise crash/hang the app; it's
+   automatic and invisible on every normal machine) in Help/README, and
+   added `get-mesa.sh` to check for newer upstream Mesa builds without
+   needing a full rebuild. If the fallback is ever needed, manually
+   moving opengl32.dll and libgallium_wgl.dll out of the install's
+   mesa-fallback folder and next to the .exe itself skips the one-time
+   probe-and-relaunch delay on that machine's first launch.
 
 Version 1.4.0 - September 02, 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

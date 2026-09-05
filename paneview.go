@@ -41,6 +41,7 @@ type pane struct {
 	onLauncher           func()                                                            // Application Launcher button clicked; commander owns the launcher popup (launcher_ui.go)
 	onCompareSync        func()                                                            // this pane's Compare/Sync button clicked; commander opens the dialog with THIS pane as the suggested primary (comparesync_ui.go)
 	onFindDuplicates     func()                                                            // this pane's Find Duplicates button clicked; commander scans THIS pane's active tab (duplicatefinder_ui.go)
+	onCopyToOtherPane    func(state *panelstate.State, fs vfs.FileSystem)                  // this pane's "copy tab to other pane" button clicked; commander appends it as a new tab on the OTHER pane (addTabFromStateWithFS there)
 	onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string)                   // Enter/double-click on a file inside an open archive; commander extracts + opens it (archive_browse_ui.go)
 	onEject              func(root string) error                                           // Eject clicked on a drive button; commander navigates both panes off it first (drivebutton_ui.go)
 	onRefreshAll         func()                                                            // this pane's own ⟳ drive-bar button clicked; commander refreshes both panes (see commander.doRefresh) rather than just this one
@@ -55,7 +56,11 @@ type pane struct {
 	statusLabel         *widget.Label
 	lockBtn             *ttwidget.Button
 	backBtn, forwardBtn *ttwidget.Button // drive bar's history nav — enabled/disabled by refreshNavButtons
+	moveTabLeftBtn      *ttwidget.Button // tab-reorder — enabled/disabled by refreshChrome based on activeIndex
+	moveTabRightBtn     *ttwidget.Button
 	driveBar            *container.Scroll
+
+	autoRefresh *autoRefresher // live-updates the active tab when its (local) directory changes on disk — see autorefresh.go
 
 	// driveRootsGen guards buildDriveBarContent's background Roots() fetch
 	// (see there) against a stale/superseded result — bumped every time the
@@ -71,10 +76,15 @@ type pane struct {
 	root fyne.CanvasObject
 }
 
-func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onLauncher func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func(), onChromeChanged func(), onReconnect func(connID string) (vfs.FileSystem, error), onCompareSync func(), onFindDuplicates func(), isPinned func(v *fileListView) bool) *pane {
-	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onLauncher: onLauncher, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll, onChromeChanged: onChromeChanged, onReconnect: onReconnect, onCompareSync: onCompareSync, onFindDuplicates: onFindDuplicates, isPinned: isPinned}
+func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, showHidden func() bool, showDriveBar func() bool, briefColumns func() int, isActivePane func() bool, onActivated func(), onStatus func(string), onOtherKey func(*fyne.KeyEvent), onFavorites func(), onContextMenu func(p *pane, view *fileListView, name string, pos fyne.Position), onSearch func(), onConnections func(), onLauncher func(), onOpenArchivedMember func(zfs *zipfs.FS, name, presentedPath string), onEject func(root string) error, onRefreshAll func(), onChromeChanged func(), onReconnect func(connID string) (vfs.FileSystem, error), onCompareSync func(), onFindDuplicates func(), onCopyToOtherPane func(state *panelstate.State, fs vfs.FileSystem), isPinned func(v *fileListView) bool) *pane {
+	p := &pane{fs: fs, win: win, colors: colors, showHidden: showHidden, showDriveBar: showDriveBar, briefColumns: briefColumns, isActivePane: isActivePane, onActivated: onActivated, onStatus: onStatus, onOtherKey: onOtherKey, onFavorites: onFavorites, onContextMenu: onContextMenu, onSearch: onSearch, onConnections: onConnections, onLauncher: onLauncher, onOpenArchivedMember: onOpenArchivedMember, onEject: onEject, onRefreshAll: onRefreshAll, onChromeChanged: onChromeChanged, onReconnect: onReconnect, onCompareSync: onCompareSync, onFindDuplicates: onFindDuplicates, onCopyToOtherPane: onCopyToOtherPane, isPinned: isPinned}
 
 	p.statusLabel = widget.NewLabel("")
+	p.autoRefresh = newAutoRefresher(func() {
+		if v := p.activeView(); v != nil {
+			v.Reload()
+		}
+	})
 
 	// Buttons take keyboard focus on click and, unless cleared, would
 	// swallow the next unmodified keypress (e.g. an F-key) instead of
@@ -96,6 +106,26 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 
 	favBtn := ttwidget.NewButton("★", func() { p.onActivated(); p.onFavorites(); unfocus() })
 	favBtn.SetToolTip("Favorites: jump to a volume or bookmarked directory, or add/manage bookmarks")
+
+	// Tab-reorder/duplicate/cross-pane buttons — plain glyphs rather than
+	// theme icons: NavigateBack/NavigateNextIcon are already spoken for by
+	// the drive bar's history nav (a different meaning), and
+	// ContentCopyIcon is already this same toolbar's Find Duplicates below,
+	// so reusing either here would be ambiguous. Deliberately act on the
+	// active tab only (no drag-and-drop, no per-tab right-click popup) —
+	// see CLAUDE.md-adjacent scoping notes: simplest compromise that still
+	// covers TotalCmd's reorder/duplicate/copy-to-other-panel convenience.
+	p.moveTabLeftBtn = ttwidget.NewButton("◀", func() { p.onActivated(); p.moveTab(-1); unfocus() })
+	p.moveTabLeftBtn.SetToolTip("Move this tab one position left")
+
+	p.moveTabRightBtn = ttwidget.NewButton("▶", func() { p.onActivated(); p.moveTab(1); unfocus() })
+	p.moveTabRightBtn.SetToolTip("Move this tab one position right")
+
+	duplicateTabBtn := ttwidget.NewButton("⧉", func() { p.onActivated(); p.duplicateTab(); unfocus() })
+	duplicateTabBtn.SetToolTip("Duplicate this tab in the same pane")
+
+	copyToOtherPaneBtn := ttwidget.NewButton("⇒", func() { p.onActivated(); p.copyTabToOtherPane(); unfocus() })
+	copyToOtherPaneBtn.SetToolTip("Copy this tab to the other pane")
 
 	selectAllBtn := ttwidget.NewButton("☑", func() {
 		p.onActivated()
@@ -169,7 +199,7 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	})
 	refreshBtn.SetToolTip("Refresh both panes (F2 / Ctrl+R) and re-scan for newly connected drives — same as the drive bar's own refresh button below")
 
-	toolbar := container.NewHBox(p.lockBtn, homeBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn, connectionsBtn, launcherBtn, compareSyncBtn, findDuplicatesBtn, refreshBtn)
+	toolbar := container.NewHBox(p.lockBtn, homeBtn, p.moveTabLeftBtn, p.moveTabRightBtn, duplicateTabBtn, copyToOtherPaneBtn, briefBtn, fullBtn, favBtn, selectAllBtn, searchBtn, connectionsBtn, launcherBtn, compareSyncBtn, findDuplicatesBtn, refreshBtn)
 
 	// p.tabs must exist before buildDriveBarContent runs: it ends by calling
 	// refreshNavButtons, which reads p.activeView() -> p.tabs.SelectedIndex()
@@ -221,6 +251,13 @@ func newPane(fs vfs.FileSystem, win fyne.Window, colors func() ColorScheme, show
 	p.root = container.NewBorder(container.NewVBox(toolbar, p.driveBar), p.statusLabel, nil, nil, p.tabs)
 	p.refreshDriveBarVisibility()
 	return p
+}
+
+// stopAutoRefresh stops this pane's directory watcher — called from quit
+// teardown (main.go's doQuit) before anything else, matching CLAUDE.md's
+// "stop background work first" ordering.
+func (p *pane) stopAutoRefresh() {
+	p.autoRefresh.stop()
 }
 
 func (p *pane) indexOf(item *container.TabItem) int {
@@ -292,6 +329,46 @@ func (p *pane) rebindViews() {
 	for _, v := range p.views {
 		p.bindView(v)
 	}
+}
+
+// moveTab swaps the active tab with its neighbor delta positions away
+// (delta -1/+1 for the move-left/move-right toolbar buttons) — a plain
+// position swap in the parallel tabs.Items/views/states slices, not a drag
+// gesture. Re-selecting the moved tab's new index fires DocTabs' own
+// OnSelected, which already calls onActivated+refreshChrome for us.
+func (p *pane) moveTab(delta int) {
+	idx := p.activeIndex()
+	newIdx := idx + delta
+	if idx < 0 || newIdx < 0 || newIdx >= len(p.tabs.Items) {
+		return
+	}
+	p.tabs.Items[idx], p.tabs.Items[newIdx] = p.tabs.Items[newIdx], p.tabs.Items[idx]
+	p.views[idx], p.views[newIdx] = p.views[newIdx], p.views[idx]
+	p.states[idx], p.states[newIdx] = p.states[newIdx], p.states[idx]
+	p.tabs.SetItems(p.tabs.Items)
+	p.tabs.SelectIndex(newIdx)
+}
+
+// duplicateTab appends a copy of the active tab (same directory, view mode,
+// sort, lock state, and backend — a fresh, empty selection and navigation
+// history via State.Clone) to the end of this pane's own tab strip.
+func (p *pane) duplicateTab() {
+	idx := p.activeIndex()
+	if idx < 0 {
+		return
+	}
+	p.addTabFromStateWithFS(p.states[idx].Clone(), p.views[idx].fs)
+}
+
+// copyTabToOtherPane hands a copy of the active tab to the OTHER pane —
+// matching TotalCmd's "Copy tab to other panel" (the original tab stays put
+// here), which commander wires to the other pane's addTabFromStateWithFS.
+func (p *pane) copyTabToOtherPane() {
+	idx := p.activeIndex()
+	if idx < 0 || p.onCopyToOtherPane == nil {
+		return
+	}
+	p.onCopyToOtherPane(p.states[idx].Clone(), p.views[idx].fs)
 }
 
 // addTabFromState creates a tab and appends+selects it directly — for call
@@ -639,6 +716,17 @@ func (p *pane) refreshChrome() {
 		p.lockBtn.SetText("🔓")
 	}
 	p.refreshNavButtons()
+	p.syncAutoRefreshWatch()
+	if idx > 0 {
+		p.moveTabLeftBtn.Enable()
+	} else {
+		p.moveTabLeftBtn.Disable()
+	}
+	if idx < len(p.tabs.Items)-1 {
+		p.moveTabRightBtn.Enable()
+	} else {
+		p.moveTabRightBtn.Disable()
+	}
 	// Switching tabs changes which cursor/selection applies; reset until the
 	// newly active view reports its own (Reload, called when a tab is built
 	// or re-selected, does so via onCursorInfo/onSelection).

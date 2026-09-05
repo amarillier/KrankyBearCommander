@@ -38,6 +38,8 @@ vendor/*
 *.bat
 *.ps1
 *.sh
+!get-mesa.sh
+mesa-staging/
 rsrc_windows_amd64.syso
 REUSABLE-DIALOGS-GUIDE.md
 CLAUDE.md

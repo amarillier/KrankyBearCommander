@@ -7,6 +7,7 @@ require (
 	fyne.io/systray v1.12.3-0.20260810170012-af4e8e793ec4
 	github.com/amarillier/go-update-checker v0.0.5
 	github.com/dweymouth/fyne-tooltip v0.4.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-gl/glfw/v3.4/glfw v0.1.0-pre.1.0.20260707082822-2a407d02d01a
 	github.com/go-ole/go-ole v1.3.0
 	github.com/hashicorp/go-version v1.3.0
@@ -24,7 +25,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fyne-io/gl-js v0.2.1-0.20260315212741-029c47fd27e8 // indirect
 	github.com/fyne-io/glfw-js v0.4.0 // indirect
 	github.com/fyne-io/image v0.1.1 // indirect

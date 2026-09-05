@@ -33,6 +33,16 @@ Launcher, Multi-Rename Tool, Change Attributes, a built-in Command Line,
   (e.g. an unmounted drive), it jumps back to your home directory instead of
   getting stuck — a lock itself is unaffected, so Home still finds the
   original location again once it's back.
+- **Move Tab, Duplicate Tab, Copy Tab to Other Pane** — ◀/▶ buttons on the
+  pane's own toolbar reorder the active tab within its pane; ⧉ duplicates
+  it (own directory, view mode, sort, lock state, plus a fresh selection
+  and history) onto the end of the same pane; ⇒ copies it the same way
+  onto the other pane instead, leaving the original in place.
+- **Auto-refresh** — a local tab's directory live-updates when something
+  changes it on disk (another program dropping in a file, a sync client,
+  ...), without needing a manual Refresh. Only the active tab of each pane
+  is watched, and only for local directories; remote connections and
+  archive tabs still use the existing manual Refresh.
 - **Brief and Full (detailed) views** — Brief is a compact, name-only wrapped
   grid, either auto-fit or a fixed 2/3/4-column count (View menu / F9 popup
   → Brief Columns); Full adds sortable, resizable Name / Ext / Size /
@@ -181,7 +191,11 @@ Launcher, Multi-Rename Tool, Change Attributes, a built-in Command Line,
   `mesa-fallback.zip` from the same release, extract it into a
   `mesa-fallback` folder next to `KrankyBearCommander.exe`, and the same
   automatic fallback applies. Most users on a normal machine will never
-  need this file at all.
+  need this file at all. If a host is already known to need the fallback
+  (e.g. a golden VM image reused for many identical no-GPU VMs), manually
+  moving `opengl32.dll` and `libgallium_wgl.dll` out of `mesa-fallback`
+  and into the same folder as the `.exe` itself skips the one-time
+  probe-and-relaunch delay on that machine's very first launch too.
 
 ## Building & running
 

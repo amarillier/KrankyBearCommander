@@ -73,6 +73,21 @@ type State struct {
 	TabTitle string
 }
 
+// Clone returns a deep copy of s — for handing a new tab (Duplicate tab /
+// Copy tab to other pane) its own Selected set and navigation history,
+// rather than aliasing the original's and having one tab's later selection
+// or Back/Forward silently mutate the other's.
+func (s *State) Clone() *State {
+	clone := *s
+	clone.Selected = make(map[string]bool, len(s.Selected))
+	for name, sel := range s.Selected {
+		clone.Selected[name] = sel
+	}
+	clone.Back = append([]string(nil), s.Back...)
+	clone.Forward = append([]string(nil), s.Forward...)
+	return &clone
+}
+
 // New returns a fresh, unlocked tab state rooted at path.
 func New(path string) *State {
 	return &State{

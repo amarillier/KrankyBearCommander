@@ -16,6 +16,7 @@ import (
 	"commander/internal/favorites"
 	"commander/internal/launchers"
 	"commander/internal/layout"
+	"commander/internal/panelstate"
 	"commander/internal/vfs"
 	"commander/internal/vfs/localfs"
 )
@@ -87,8 +88,8 @@ func newCommander(a fyne.App, win fyne.Window) *commander {
 	c.loadLaunchers()
 	c.loadSevenZipPath()
 
-	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryLeft) }, c.doFindDuplicates, c.isPinnedByBackgroundOp)
-	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryRight) }, c.doFindDuplicates, c.isPinnedByBackgroundOp)
+	c.left = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 0 }, func() { c.setActivePane(0) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.left) }, c.showRowContextMenu, func() { c.showSearch(c.left) }, func() { c.showConnections(c.left) }, func() { c.showLauncherMenu(c.left) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryLeft) }, c.doFindDuplicates, func(state *panelstate.State, fs vfs.FileSystem) { c.right.addTabFromStateWithFS(state, fs) }, c.isPinnedByBackgroundOp)
+	c.right = newPane(c.fs, win, c.colors, func() bool { return c.showHiddenFiles }, func() bool { return c.showDriveBar }, func() int { return c.briefColumns }, func() bool { return c.activePaneIndex == 1 }, func() { c.setActivePane(1) }, c.showStatus, c.dispatchKey, func() { c.showFavoritesMenu(c.right) }, c.showRowContextMenu, func() { c.showSearch(c.right) }, func() { c.showConnections(c.right) }, func() { c.showLauncherMenu(c.right) }, c.openArchivedMember, c.ejectDrive, c.doRefresh, c.refreshCmdLineCwd, c.reconnectConnection, func() { c.showCompareSync(comparePrimaryRight) }, c.doFindDuplicates, func(state *panelstate.State, fs vfs.FileSystem) { c.left.addTabFromStateWithFS(state, fs) }, c.isPinnedByBackgroundOp)
 
 	c.split = container.NewHSplit(c.left.root, c.right.root)
 	c.split.Offset = 0.5
